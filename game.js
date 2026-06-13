@@ -346,7 +346,7 @@
       character: selectedCharacter,
       x: 300, y: GROUND, w: 44, h: 92,
       vx: 0, vy: 0, facing: 1,
-      health: 100, lagHealth: 100, energy: 70,
+      health: 600, maxHealth: 600, lagHealth: 600, energy: 70,
       grounded: true, wall: 0, airDash: true, jumps: 1,
       state: "idle", stateTime: 0, attack: null,
       comboStep: -1, airComboStep: -1, comboWindow: 0, comboHits: 0, comboTimer: 0,
@@ -363,8 +363,9 @@
       damageDealt: 0, pressure: 0, voiceCooldown: 0,
       heat: 0, jackpot: 0, parryHot: 0,
       nextM1Fast: false,
-      rewindWindow: 0, rewindX: 0, rewindY: 0, rewindHealth: 100,
+      rewindWindow: 0, rewindX: 0, rewindY: 0, rewindHealth: 600,
       jackpotFinisher: false,
+      charging: false, chargeRecovery: 0, chargeCooldown: 0, chargePulse: 0,
     };
   }
 
@@ -395,11 +396,12 @@
       onlineVariant: slot === 2 && character === "gojo" ? "inverted" : "normal",
       x: slot === 1 ? 300 : 950, y: GROUND, w: 44, h: 92,
       vx: 0, vy: 0, facing: slot === 1 ? 1 : -1,
-      health: 100, maxHealth: 100, lagHealth: 100, energy: 70,
+      health: 600, maxHealth: 600, lagHealth: 600, energy: 70,
       grounded: true, state: "idle", stateTime: 0, attack: null,
       stun: 0, invuln: 0, flash: 0, blocking: false,
       reaction: "idle", wallSplat: 0, awakening: 0, burnout: 0,
       heat: 0, jackpot: 0,
+      charging: false,
       comboStep: -1, airComboStep: -1,
       adaptation: { light: 0, heavy: 0, special: 0, parryBaits: 0 },
       lastPlayerStrategy: "",
@@ -687,9 +689,20 @@
     });
   }
 
+  function stopEnergyCharge(interrupted = false) {
+    const p = game.player;
+    if (!p?.charging) return;
+    p.charging = false;
+    p.chargeRecovery = .2;
+    p.chargeCooldown = 1;
+    p.state = interrupted ? "hit" : "chargeRecover";
+    p.vx = 0;
+    tone(interrupted ? 80 : 260, .1, "sine", .12, interrupted ? -40 : 120);
+  }
+
   function playerAttack(type) {
     const p = game.player;
-    if (!p || p.stun > 0 || game.cinematic > 0 || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.charging || p.chargeRecovery > 0 || game.cinematic > 0 || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
     if (type === "heavy" && attemptBlackFlash()) return;
     if (p.attack) {
       if (type === "light" && p.attack.chain) {
@@ -781,7 +794,7 @@
 
   function shortDash() {
     const p = game.player;
-    if (!p || p.stun > 0 || p.dashCooldown > 0 || game.cinematic > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.charging || p.chargeRecovery > 0 || p.dashCooldown > 0 || game.cinematic > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
     const canCancel = p.attack?.hitConfirmed && p.attack.dashCancel && p.attack.elapsed >= p.attack.start;
     if (p.attack && !canCancel) return;
     if (!p.grounded && !p.airDash) return;
@@ -861,7 +874,7 @@
     const p = game.player;
     const profile = characterProfile(p);
     const domainResponse = game.online.active && name === "domain" && game.online.remoteDomainWindow > 0;
-    if (!p || p.stun > 0 || (game.cinematic > 0 && !domainResponse) || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.charging || p.chargeRecovery > 0 || (game.cinematic > 0 && !domainResponse) || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
     if (p.character === "gojo" && name === "purple") {
       if (!game.unstablePurple || game.unstablePurple.state !== "unstable") return;
       stabilizeHollowPurple();
@@ -901,6 +914,7 @@
           kind: "projectile", projectile: {
             type: "blue", x: p.x + p.facing * 175, y: p.y - 105,
             vx: p.facing * 55, vy: 0, w: 38, h: 38, life: 2.8,
+            damage: 2.3, tick: 0, strong: false,
           },
         });
         tone(85, .6, "sine", .25, 420);
@@ -919,6 +933,7 @@
           kind: "projectile", projectile: {
             type: "red", x: p.x + p.facing * 55, y: p.y - 80,
             vx: p.facing * 510, vy: 0, w: 48, h: 48, life: 1.5,
+            damage: 18, kbX: 620, kbY: 240, strong: true,
           },
         });
         tone(150, .35, "sawtooth", .3, -100);
@@ -1081,7 +1096,10 @@
     spawnParticles(x, y, "#438cff", 18, 320, 6, .7);
     tone(48, 1.2, "sawtooth", .28, 105);
     noise(.18, .16);
-    sendOnline("event", { kind: "purpleFusion", x, y, facing: p.facing, timer: 3.8 });
+    sendOnline("event", {
+      kind: "purpleFusion", x, y, facing: p.facing, timer: 3.8,
+      consumedEnemyRed: red.owner === "enemy",
+    });
   }
 
   function stabilizeHollowPurple() {
@@ -1127,6 +1145,8 @@
       kind: "projectile", projectile: {
         type: "purple", x: purple.x, y: purple.y,
         vx: purple.facing * 760, vy: 0, w: 300, h: 126, life: 1.65,
+        damage: p.awakening > 0 ? 100 : 88, kbX: 980, kbY: 220,
+        strong: true, erasing: true,
       },
     });
     spawnShockwave(purple.x, purple.y, "#e9d6ff");
@@ -1293,7 +1313,7 @@
     const p = game.player;
     p.jackpot = 38;
     p.energy = 100;
-    p.health = Math.min(100, p.health + 18);
+    p.health = Math.min(p.maxHealth, p.health + 18);
     p.awakening = 38;
     p.damageScale = 1.28;
     p.heat = 100;
@@ -1334,7 +1354,7 @@
     if (p.jackpot > 0) {
       p.jackpot = Math.max(0, p.jackpot - dt);
       p.energy = 100;
-      p.health = Math.min(100, p.health + dt * 7.2);
+      p.health = Math.min(p.maxHealth, p.health + dt * 7.2);
       p.heat = 100;
       if (chance(dt * 8)) {
         spawnParticles(p.x + rnd(-24, 24), p.y - rnd(25, 105), chance(.3) ? "#fff35d" : "#4dff87", 1, 150, 5, .45);
@@ -1376,17 +1396,18 @@
 
   function awaken() {
     const p = game.player;
+    if (p?.charging || p?.chargeRecovery > 0) return;
     if (p?.character === "hakari") {
       consecutiveEffect();
       return;
     }
     const sukunaReady = p?.character === "sukuna" && p.damageDealt >= 55 && p.energy >= 40;
-    const gojoReady = p?.character !== "sukuna" && p.energy >= 50 && p.health <= 60;
+    const gojoReady = p?.character !== "sukuna" && p.energy >= 50 && p.health <= p.maxHealth * .6;
     if (!p || p.awakening > 0 || (!sukunaReady && !gojoReady)) return;
     p.energy -= p.character === "sukuna" ? 40 : 50;
     p.awakening = 12;
     p.damageScale = p.character === "sukuna" ? 1.35 : 1.25;
-    if (p.character !== "sukuna") p.health = Math.min(100, p.health + 12);
+    if (p.character !== "sukuna") p.health = Math.min(p.maxHealth, p.health + 12);
     p.invuln = 1.2;
     game.cinematic = .9;
     game.flash = .25;
@@ -1464,6 +1485,7 @@
     const isPlayerDefending = defender.kind === "player";
     const p = game.player;
     const now = performance.now();
+    if (isPlayerDefending && p.charging) stopEnergyCharge(true);
 
     if (isPlayerDefending && p.blocking && p.grounded) {
       const perfect = now - p.guardStart <= 105;
@@ -1525,7 +1547,7 @@
       return true;
     }
 
-    const scale = attacker.kind === "player" ? p.damageScale : attacker.power;
+    const scale = attack.fixedDamage ? 1 : attacker.kind === "player" ? p.damageScale : attacker.power;
     const armored = isPlayerDefending && p.character === "hakari" && p.attack?.armor && !attack.strong;
     const damage = attack.damage * scale * (armored ? .42 : 1);
     defender.health -= damage;
@@ -1697,6 +1719,31 @@
     p.burnoutSmoke = Math.max(0, p.burnoutSmoke - dt);
     p.voiceCooldown = Math.max(0, p.voiceCooldown - dt);
     p.rewindWindow = Math.max(0, p.rewindWindow - dt);
+    p.chargeCooldown = Math.max(0, p.chargeCooldown - dt);
+    p.chargeRecovery = Math.max(0, p.chargeRecovery - dt);
+    p.chargePulse = Math.max(0, p.chargePulse - dt);
+    if (p.charging && !keys.has("c")) stopEnergyCharge();
+    const canStartCharge = pressed.has("c") && p.chargeCooldown <= 0 && p.chargeRecovery <= 0
+      && p.stun <= 0 && !p.attack && !p.blocking && game.cinematic <= 0;
+    if (!p.charging && canStartCharge) {
+      p.charging = true;
+      p.state = "charge";
+      p.vx = 0;
+      p.chargePulse = 0;
+      announce("CURSED ENERGY CHARGE");
+      tone(95, .25, "sine", .13, 180);
+    }
+    if (p.charging) {
+      p.vx = 0;
+      p.blocking = false;
+      p.state = "charge";
+      p.energy = Math.min(100, p.energy + dt * 24);
+      if (p.chargePulse <= 0) {
+        p.chargePulse = .06;
+        const chargeColor = p.character === "sukuna" ? "#ff3158" : p.character === "hakari" ? "#58ff8c" : "#65eaff";
+        spawnParticles(p.x + rnd(-28, 28), p.y - rnd(20, 105), chargeColor, 2, 130, 5, .45);
+      }
+    }
     p.pressure = Math.max(0, p.pressure - dt * .35);
     if (p.character === "hakari" && p.jackpot <= 0) p.heat = Math.max(0, p.heat - dt * .42);
     p.parryTimer = Math.max(0, p.parryTimer - dt);
@@ -1706,7 +1753,7 @@
     if (p.awakening <= 0) p.damageScale = 1;
     p.canAwaken = p.character !== "hakari" && p.awakening <= 0 && (p.character === "sukuna"
       ? p.damageDealt >= 55 && p.energy >= 40
-      : p.health <= 60 && p.energy >= 50);
+      : p.health <= p.maxHealth * .6 && p.energy >= 50);
     for (const name of Object.keys(p.cooldowns)) p.cooldowns[name] = Math.max(0, p.cooldowns[name] - dt);
     const aggressionRegen = p.character === "sukuna" ? p.pressure * (p.awakening > 0 ? 1.7 : 1.05) : 0;
     const regenRate = (1.05 + (p.regenBoost > 0 ? 2.1 : 0) + (p.damageRegen > 0 ? 1.6 : 0) + (game.domain > 0 ? 1.7 : 0) + aggressionRegen)
@@ -1722,7 +1769,7 @@
       });
     }
 
-    if (p.stun <= 0 && !p.attack && game.cinematic <= 0) {
+    if (p.stun <= 0 && !p.attack && !p.charging && p.chargeRecovery <= 0 && game.cinematic <= 0) {
       const move = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
       const speed = (p.jackpot > 0 ? 402 : p.awakening > 0 ? (p.character === "sukuna" ? 385 : 360) : p.character === "sukuna" ? 312 : p.character === "hakari" ? 318 : 295) * (p.burnout > 0 ? .58 : 1);
       if (move) {
@@ -1747,6 +1794,7 @@
         p.vx *= .7;
       }
     } else if (p.stun > 0) {
+      if (p.charging) stopEnergyCharge(true);
       p.state = "hit";
       p.blocking = false;
       const recoveryDirection = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
@@ -1915,6 +1963,7 @@
     e.burnout = target.burnout;
     e.heat = target.heat || 0;
     e.jackpot = target.jackpot || 0;
+    e.charging = Boolean(target.charging);
     e.comboStep = target.comboStep;
     e.airComboStep = target.airComboStep;
     e.attack = target.attack ? { ...target.attack, hit: new Set() } : null;
@@ -2071,27 +2120,28 @@
           spawnParticles(o.x, o.y, "#65ff97", 7, 180, 4, .3);
         }
       }
-      if (o.visualOnly) {
-        if (o.type === "blue" && chance(.35)) spawnParticles(o.x, o.y, "#4e7fff", 1, 80, 3, .3);
-        if (o.life <= 0 || o.x < -300 || o.x > W + 300) game.projectiles.splice(i, 1);
-        continue;
-      }
+      const incomingBox = { x: o.x - o.w / 2, y: o.y - o.h / 2, w: o.w, h: o.h };
+      if (o.owner === "enemy" && rectsOverlap(incomingBox, bodyBox(p))) reflectProjectile(o);
       if (o.type === "blue") {
         const blueTarget = o.owner === "player" ? e : p;
         const blueAttacker = o.owner === "player" ? p : e;
         const dx = o.x - blueTarget.x;
         const dy = o.y - (blueTarget.y - blueTarget.h / 2);
         const dist = Math.hypot(dx, dy);
-        if (dist < 290 && blueTarget.stun <= 0) {
-          blueTarget.vx += (dx / Math.max(1, dist)) * 740 * dt;
-          blueTarget.vy += (dy / Math.max(1, dist)) * 380 * dt;
-          o.tick -= dt;
-          if (o.tick <= 0 && dist < 85) {
-            applyHit(blueAttacker, blueTarget, { name: "Blue", type: "special", damage: o.damage, kbX: 20, kbY: 0, color: "#3d8dff" });
+        if (dist < 340) {
+          blueTarget.vx += (dx / Math.max(1, dist)) * 940 * dt;
+          blueTarget.vy += (dy / Math.max(1, dist)) * 470 * dt;
+          o.tick = Number.isFinite(o.tick) ? o.tick - dt : 0;
+          if (!o.visualOnly && o.tick <= 0 && dist < 85) {
+            applyHit(blueAttacker, blueTarget, { name: "Blue", type: "special", damage: o.damage, kbX: 20, kbY: 0, color: "#3d8dff", fixedDamage: o.reflected });
             o.tick = .38;
           }
         }
         if (chance(.35)) spawnParticles(o.x, o.y, "#4e7fff", 1, 80, 3, .3);
+      }
+      if (o.visualOnly) {
+        if (o.life <= 0 || o.x < -300 || o.x > W + 300) game.projectiles.splice(i, 1);
+        continue;
       }
 
       const target = o.owner === "player" ? e : p;
@@ -2109,6 +2159,7 @@
         applyHit(attacker, target, {
           name: projectileNames[o.type] || "Cursed Shot",
           type: "special", damage: o.damage, kbX: o.kbX, kbY: o.kbY, strong: o.strong,
+          fixedDamage: o.reflected,
           reaction: o.type === "dismantle" || o.type === "worldSlash" ? "slash" : o.type === "door" ? "body" : undefined,
           color: o.type === "door" || o.type === "reserveBall" ? "#55f087"
             : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
@@ -2136,15 +2187,16 @@
     if (game.unstablePurple) return false;
     for (let i = 0; i < game.projectiles.length; i++) {
       const a = game.projectiles[i];
-      if (a.owner !== "player" || (a.type !== "blue" && a.type !== "red")) continue;
+      if (a.type !== "blue" && a.type !== "red") continue;
       for (let j = i + 1; j < game.projectiles.length; j++) {
         const b = game.projectiles[j];
-        if (b.owner !== "player" || a.type === b.type || (b.type !== "blue" && b.type !== "red")) continue;
+        if (a.type === b.type || (b.type !== "blue" && b.type !== "red")) continue;
+        const blue = a.type === "blue" ? a : b;
+        const red = a.type === "red" ? a : b;
+        if (blue.owner !== "player") continue;
         const aBox = { x: a.x - a.w / 2, y: a.y - a.h / 2, w: a.w, h: a.h };
         const bBox = { x: b.x - b.w / 2, y: b.y - b.h / 2, w: b.w, h: b.h };
         if (!rectsOverlap(aBox, bBox)) continue;
-        const blue = a.type === "blue" ? a : b;
-        const red = a.type === "red" ? a : b;
         game.projectiles.splice(j, 1);
         game.projectiles.splice(i, 1);
         createUnstablePurple(blue, red);
@@ -2225,6 +2277,63 @@
         return;
       }
     }
+  }
+
+  function reflectProjectile(projectile) {
+    const p = game.player;
+    const e = game.enemy;
+    if (!p || !e || projectile.owner !== "enemy" || projectile.reflected || !p.blocking || !p.grounded) return false;
+    if (performance.now() - p.guardStart > 105) return false;
+    const speed = Math.max(360, Math.hypot(projectile.vx || 0, projectile.vy || 0));
+    const targetX = e.x;
+    const targetY = e.y - e.h * .55;
+    const dx = targetX - projectile.x;
+    const dy = targetY - projectile.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    projectile.owner = "player";
+    projectile.visualOnly = false;
+    projectile.reflected = true;
+    projectile.hitTarget = false;
+    projectile.life = Math.max(projectile.life, 1.2);
+    projectile.vx = dx / distance * speed;
+    projectile.vy = dy / distance * speed;
+    p.invuln = .35;
+    p.parryStreak++;
+    p.parryTimer = 3;
+    p.energy = Math.min(100, p.energy + 12);
+    if (p.character === "hakari") {
+      p.energy = Math.min(100, p.energy + 8);
+      p.heat = Math.min(100, p.heat + 18);
+      p.parryHot = Math.min(4, p.parryHot + .8);
+      p.nextM1Fast = true;
+    }
+    game.parries++;
+    if (game.online.active) game.online.stats.parries++;
+    game.slow = .45;
+    game.hitstop = .1;
+    game.shake = 10;
+    game.flash = .1;
+    announce("PROJECTILE REFLECT");
+    spawnShockwave(p.x + p.facing * 20, p.y - 62, "#dfffff");
+    spawnParticles(projectile.x, projectile.y, "#dfffff", 24, 430, 7, .55);
+    tone(810, .16, "square", .28, 420);
+    if (game.online.active) {
+      sendOnline("event", {
+        kind: "projectileReflect",
+        x: projectile.x,
+        y: projectile.y,
+        projectile: {
+          type: projectile.type, rarity: projectile.rarity,
+          x: projectile.x, y: projectile.y,
+          vx: projectile.vx, vy: projectile.vy,
+          w: projectile.w, h: projectile.h, life: projectile.life,
+          damage: projectile.damage, kbX: projectile.kbX, kbY: projectile.kbY,
+          strong: projectile.strong, erasing: projectile.erasing,
+          bounces: projectile.bounces, reflected: true,
+        },
+      });
+    }
+    return true;
   }
 
   function updateEffects(dt) {
@@ -2347,7 +2456,7 @@
     if (game.mode === "story" && game.wave < 3) {
       game.wave++;
       game.enemy = makeEnemy(game.wave - 1);
-      game.player.health = Math.min(100, game.player.health + 18);
+      game.player.health = Math.min(game.player.maxHealth, game.player.health + 18);
       game.player.energy = Math.min(100, game.player.energy + 25);
       game.unstablePurple = null;
       game.time = 99;
@@ -2363,7 +2472,7 @@
       game.enemy.maxHealth *= 1 + game.wave * .045;
       game.enemy.health = game.enemy.maxHealth;
       game.enemy.lagHealth = game.enemy.maxHealth;
-      game.player.health = Math.min(100, game.player.health + 8);
+      game.player.health = Math.min(game.player.maxHealth, game.player.health + 8);
       game.player.energy = Math.min(100, game.player.energy + 15);
       game.unstablePurple = null;
       game.time += 22;
@@ -2379,7 +2488,7 @@
       game.enemy.health = game.enemy.maxHealth;
       game.enemy.lagHealth = game.enemy.maxHealth;
       game.enemy.power *= 1 + game.wave * .08;
-      game.player.health = Math.min(100, game.player.health + 12);
+      game.player.health = Math.min(game.player.maxHealth, game.player.health + 12);
       game.player.energy = Math.min(100, game.player.energy + 22);
       game.unstablePurple = null;
       game.time = 99;
@@ -2483,29 +2592,34 @@
     if (!p || !e) return;
     const profile = characterProfile(p);
     const enemyProfile = game.online.active ? characterProfile(e) : null;
-    ui.playerHealth.style.transform = `scaleX(${clamp(p.health / 100, 0, 1)})`;
-    ui.playerLag.style.transform = `scaleX(${clamp(p.lagHealth / 100, 0, 1)})`;
+    ui.playerHealth.style.transform = `scaleX(${clamp(p.health / p.maxHealth, 0, 1)})`;
+    ui.playerLag.style.transform = `scaleX(${clamp(p.lagHealth / p.maxHealth, 0, 1)})`;
     ui.playerEnergy.style.transform = `scaleX(${p.energy / 100})`;
     ui.enemyHealth.style.transform = `scaleX(${clamp(e.health / e.maxHealth, 0, 1)})`;
     ui.enemyLag.style.transform = `scaleX(${clamp(e.lagHealth / e.maxHealth, 0, 1)})`;
     ui.enemyEnergy.style.transform = `scaleX(${e.energy / 100})`;
-    ui.playerName.textContent = profile.name;
+    ui.playerName.textContent = `${profile.name}  ${Math.ceil(p.health)} HP`;
     const playerPortrait = p.character === "sukuna" ? "sukuna-portrait" : p.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
     const playerMark = p.character === "sukuna" ? "SK" : p.character === "hakari" ? "HK" : "VI";
     ui.playerPortrait.className = `portrait ${playerPortrait}`;
     ui.playerPortrait.querySelector("span").textContent = playerMark;
-    ui.enemyName.textContent = game.online.active ? enemyProfile.name : e.type.name;
+    ui.enemyName.textContent = `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
     ui.enemyState.textContent = game.online.active ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}` : e.type.rank;
     const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
     const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : "VI";
     ui.enemyPortrait.className = `portrait ${game.online.active ? enemyPortrait : "curse-portrait"}`;
     ui.enemyPortrait.querySelector("span").textContent = game.online.active ? enemyMark : "CR";
-    ui.playerState.textContent = game.online.active
+    const normalPlayerState = game.online.active
       ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
       : p.awakening > 0
-      ? `${p.character === "sukuna" ? "KING OF CURSES" : p.character === "hakari" ? "JACKPOT MODE" : "AWAKENED"} ${p.awakening.toFixed(1)}s`
-      : p.burnout > 0 ? `BURNT OUT ${p.burnout.toFixed(1)}s`
-        : p.canAwaken ? "AWAKENING READY" : profile.title;
+        ? `${p.character === "sukuna" ? "KING OF CURSES" : p.character === "hakari" ? "JACKPOT MODE" : "AWAKENED"} ${p.awakening.toFixed(1)}s`
+        : p.burnout > 0 ? `BURNT OUT ${p.burnout.toFixed(1)}s`
+          : p.canAwaken ? "AWAKENING READY" : profile.title;
+    ui.playerState.textContent = p.charging
+      ? `CHARGING CE ${p.energy.toFixed(0)}%`
+      : p.chargeRecovery > 0
+        ? `CHARGE RECOVERY ${p.chargeRecovery.toFixed(1)}s`
+        : p.chargeCooldown > 0 ? `CHARGE COOLDOWN ${p.chargeCooldown.toFixed(1)}s` : normalPlayerState;
     if (ui.fControl) ui.fControl.innerHTML = `<kbd>F</kbd> ${p.character === "hakari" ? "CONSECUTIVE EFFECT" : "AWAKEN"}`;
     ui.timer.textContent = game.mode === "training" ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
     ui.mode.textContent = game.mode.toUpperCase();
@@ -2519,6 +2633,8 @@
     if (p.blackFlashWindow > 0) {
       prompt = "M2 NOW | BLACK FLASH";
       blackFlashPrompt = true;
+    } else if (p.charging) {
+      prompt = "HOLD C | CURSED ENERGY CHARGE";
     } else if (p.attack?.hitConfirmed && p.attack.dashCancel) {
       prompt = "SHIFT | DASH CANCEL";
     } else if (p.attack?.hitConfirmed && p.attack.launcher) {
@@ -2581,7 +2697,7 @@
 
   function jump() {
     const p = game.player;
-    if (!p || p.stun > 0 || p.blocking || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.blocking || p.charging || p.chargeRecovery > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
     const jumpCancel = p.attack?.launcher && p.attack.hitConfirmed && p.attack.elapsed >= p.attack.start;
     if (p.attack && !jumpCancel) return;
     if (jumpCancel) {
@@ -3044,7 +3160,30 @@
     if (entity.flash > 0 && !tint) drawHakari(entity, clamp(entity.flash / .12, 0, 1), "#ffffff");
   }
 
+  function drawChargeAura(entity) {
+    const t = performance.now() * .012;
+    const color = entity.character === "sukuna" ? "#ff3158" : entity.character === "hakari" ? "#58ff8c" : "#65eaff";
+    ctx.save();
+    ctx.translate(Math.round(entity.x), Math.round(entity.y - 55));
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = .28 + Math.sin(t) * .08;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 5;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 34 + i * 9 + Math.sin(t + i) * 4, 55 + i * 8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = .7;
+    for (let i = 0; i < 8; i++) {
+      const angle = t * .35 + i * Math.PI / 4;
+      pixelRect(Math.cos(angle) * 42, Math.sin(angle) * 62, 4 + i % 3, 9 + i % 4, color);
+    }
+    ctx.restore();
+  }
+
   function drawFighter(entity, alpha = 1, tint = null) {
+    if (entity?.charging && !tint) drawChargeAura(entity);
     if (entity?.character === "hakari") drawHakari(entity, alpha, tint);
     else if (entity?.character === "sukuna") drawSukuna(entity, alpha, tint);
     else drawGojo(entity, alpha, tint);
@@ -3582,6 +3721,7 @@
       x: p.x, y: p.y, vx: p.vx, vy: p.vy,
       facing: p.facing, grounded: p.grounded,
       state: p.state, blocking: p.blocking,
+      charging: p.charging,
       health: Math.max(0, p.health), energy: p.energy,
       awakening: p.awakening, burnout: p.burnout,
       heat: p.heat, jackpot: p.jackpot,
@@ -3594,6 +3734,7 @@
     const p = game.player;
     if (!game.online.active || !p || p.invuln > 0 || game.state !== "playing") return;
     const now = performance.now();
+    if (p.charging) stopEnergyCharge(true);
     if (p.blocking && p.grounded) {
       const perfect = now - p.guardStart <= 105;
       if (perfect) {
@@ -3679,9 +3820,30 @@
         ...event.projectile,
         owner: "enemy",
         visualOnly: true,
-        damage: 0,
-        strong: event.projectile.type === "purple",
+        damage: Number(event.projectile.damage || 0),
+        strong: Boolean(event.projectile.strong || event.projectile.type === "purple"),
       });
+    } else if (event.kind === "projectileReflect" && event.projectile) {
+      let nearestIndex = -1;
+      let nearestDistance = Infinity;
+      game.projectiles.forEach((projectile, index) => {
+        if (projectile.owner !== "player" || projectile.type !== event.projectile.type) return;
+        const distance = Math.hypot(projectile.x - Number(event.x || 0), projectile.y - Number(event.y || 0));
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+      if (nearestIndex >= 0) game.projectiles.splice(nearestIndex, 1);
+      game.projectiles.push({
+        ...event.projectile,
+        owner: "enemy",
+        visualOnly: true,
+        reflected: true,
+      });
+      game.slow = .25;
+      game.shake = 8;
+      announce("PROJECTILE REFLECTED");
     } else if (event.kind === "parry") {
       game.player.stun = Math.max(game.player.stun, .85 + Math.min(3, event.streak || 1) * .1);
       game.player.attack = null;
@@ -3703,6 +3865,19 @@
       game.cameraTarget = 1.22;
       announce("DOMAIN EXPANSION");
     } else if (event.kind === "purpleFusion") {
+      if (event.consumedEnemyRed) {
+        let nearestRed = -1;
+        let nearestDistance = Infinity;
+        game.projectiles.forEach((projectile, index) => {
+          if (projectile.owner !== "player" || projectile.type !== "red") return;
+          const distance = Math.hypot(projectile.x - Number(event.x || 0), projectile.y - Number(event.y || 0));
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestRed = index;
+          }
+        });
+        if (nearestRed >= 0) game.projectiles.splice(nearestRed, 1);
+      }
       game.shake = 6;
       game.glitch = .18;
       spawnParticles(event.x, event.y, "#814dff", 45, 390, 9, 1);
@@ -3757,7 +3932,7 @@
 
   window.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
-    if (["a", "d", "w", "s", "q", "e", "r", "t", "f", "shift", "escape", "enter", " "].includes(key)) {
+    if (["a", "d", "w", "s", "c", "q", "e", "r", "t", "f", "shift", "escape", "enter", " "].includes(key)) {
       event.preventDefault();
     }
     if (!keys.has(key)) pressed.add(key);
@@ -3917,6 +4092,7 @@
       beginClash,
       resolveClash,
       keys,
+      pressed,
       game,
       selectStage,
       snapshot: () => game.player && game.enemy ? {
