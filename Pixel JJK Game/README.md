@@ -1,6 +1,7 @@
 # Void Limit
 
-A browser fighting game built with HTML5 Canvas, including two-player online rooms.
+A browser fighting game built with HTML5 Canvas, including three playable
+fighters and two-player online rooms.
 
 Open `index.html` directly in a modern browser. No installation is required.
 
@@ -16,7 +17,8 @@ Open `index.html` directly in a modern browser. No installation is required.
 
 Rooms support two players only. They include lobby chat, ping indicators,
 host-controlled settings, synchronized loading, reconnect protection, rematches,
-and online battle statistics. Player 2 always uses the inverted Gojo palette.
+and online battle statistics. Player 2 uses an inverted palette so mirror
+matches remain readable.
 
 ## Character selection
 
@@ -28,10 +30,14 @@ both fighters lock in.
   Purple, and Unlimited Void.
 - **Ryomen Sukuna**: aggressive rushdown and counter-offense using Dismantle,
   Cleave, World Slash, and Malevolent Shrine.
+- **Kinji Hakari**: high-pressure gambling brawler using Rough Cursed Punch,
+  Shutter Doors, Reserve Balls, Consecutive Effect, and Idle Death Gamble.
 
-Both characters use the same movement and button layout. Sukuna has his own
-five-hit ground and air chains, launcher and crater routes, Ruthless Counter,
-aggression-based cursed energy gain, and King of Curses awakening.
+All characters use the same movement and button layout. Hakari has unique
+five-hit ground and air chains, a Heat Meter, improved odds from aggressive
+play and perfect parries, a three-slot Domain sequence, and a 38-second
+gameplay-balanced Jackpot Mode with unlimited cursed energy and automatic
+healing.
 
 The online server uses only Node.js built-in features and does not install
 packages. Windows Firewall may ask the host to allow local network access the
@@ -56,11 +62,9 @@ Each stage has its own lighting palette and destructible props.
 - `Mouse 1`: Five-hit M1 chain / aerial chain
 - `Mouse 2`: Heavy attack / Black Flash timing input
 - `Shift`: Short dash / air dash / hit-confirm dash cancel
-- `E`: Reversal: Red
-- `R`: Lapse: Blue
-- `Q`: Hollow Purple
-- `T`: Unlimited Void
-- `F`: Awakening
+- `E`, `R`, `Q`: Character special techniques
+- `T`: Character Domain Expansion
+- `F`: Awakening / Hakari Consecutive Effect
 - `A` / `D`: Alternate during clashes
 - `Esc`: Pause
 

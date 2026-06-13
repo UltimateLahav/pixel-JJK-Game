@@ -230,7 +230,7 @@ function handleRoomMessage(client, msg) {
     broadcast(room, { type: "characterSelect", room: roomView(room) });
     syncRoom(room);
   } else if (msg.type === "character" && room.state === "selecting") {
-    if (!["gojo", "sukuna"].includes(msg.character)) return;
+    if (!["gojo", "sukuna", "hakari"].includes(msg.character)) return;
     if (player.locked) return;
     player.character = msg.character;
     player.locked = Boolean(msg.locked);

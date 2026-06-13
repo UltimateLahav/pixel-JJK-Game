@@ -33,6 +33,11 @@
     stageLabel: $("#stageLabel"),
     purpleStatus: $("#purpleStatus"),
     purpleTimer: $("#purpleTimer"),
+    heatStatus: $("#heatStatus"),
+    heatMeter: $("#heatMeter"),
+    heatValue: $("#heatValue"),
+    heatHint: $("#heatHint"),
+    fControl: $("#fControl"),
     announcement: $("#announcement"),
     training: $("#trainingData"),
     resultTitle: $("#resultTitle"),
@@ -132,6 +137,8 @@
     purpleExplosion: 0,
     realityCrack: 0,
     domainCharacter: "gojo",
+    hakariDomain: null,
+    jackpotFlash: 0,
     online: {
       active: false,
       slot: 0,
@@ -182,6 +189,23 @@
       labels: { red: "DISMANTLE", blue: "CLEAVE", purple: "WORLD SLASH", domain: "SHRINE" },
       costs: { blue: 22, red: 16, purple: 72, domain: 100 },
       cooldowns: { blue: 5.2, red: 3.4, purple: 12, domain: 24 },
+    },
+    hakari: {
+      id: "hakari",
+      name: "KINJI HAKARI",
+      title: "FEVER FIGHTER",
+      difficulty: "MEDIUM",
+      description: "High-pressure gambling brawler who builds Heat, risks everything in Idle Death Gamble, and explodes after jackpot.",
+      abilities: [
+        ["E", "ROUGH CURSED PUNCH"],
+        ["R", "SHUTTER DOORS"],
+        ["Q", "RESERVE BALLS"],
+        ["F", "CONSECUTIVE EFFECT"],
+        ["T", "IDLE DEATH GAMBLE"],
+      ],
+      labels: { red: "ROUGH PUNCH", blue: "SHUTTER", purple: "RESERVE BALLS", domain: "GAMBLE" },
+      costs: { blue: 20, red: 16, purple: 14, domain: 100 },
+      cooldowns: { blue: 5.5, red: 3.8, purple: 2.8, domain: 25 },
     },
   };
 
@@ -240,15 +264,36 @@
     { name: "Twin Heel", duration: .31, start: .09, end: .19, cancel: .21, range: 70, h: 61, y: -60, damage: 8.2, kbX: 125, kbY: 70, reaction: "air" },
     { name: "King's Downfall", duration: .46, start: .13, end: .28, cancel: .3, range: 76, h: 76, y: -52, damage: 13.5, kbX: 95, kbY: -760, reaction: "slam", downslam: true, strong: true, finisher: true },
   ];
+  const hakariGroundChain = [
+    { name: "Body Jab", duration: .19, start: .035, end: .095, cancel: .11, range: 52, h: 44, y: -66, damage: 4.6, kbX: 65, reaction: "body", rough: true },
+    { name: "Heavy Hook", duration: .23, start: .05, end: .12, cancel: .14, range: 62, h: 49, y: -76, damage: 5.8, kbX: 84, reaction: "head", dashCancel: true, rough: true },
+    { name: "Gut Knee", duration: .25, start: .06, end: .14, cancel: .16, range: 58, h: 49, y: -57, damage: 6.3, kbX: 90, reaction: "body", dashCancel: true, rough: true },
+    { name: "Spinning Elbow", duration: .29, start: .08, end: .18, cancel: .2, range: 72, h: 57, y: -73, damage: 7.4, kbX: 132, reaction: "head", rough: true },
+    { name: "Fever Breaker", duration: .42, start: .135, end: .26, cancel: .285, range: 84, h: 66, y: -73, damage: 12.5, kbX: 420, kbY: 95, reaction: "body", strong: true, finisher: true, rough: true },
+  ];
+  const hakariAirChain = [
+    { name: "Air Jab", duration: .21, start: .04, end: .105, cancel: .12, range: 54, h: 45, y: -68, damage: 5, kbX: 68, kbY: 30, reaction: "air", rough: true },
+    { name: "Side Kick", duration: .24, start: .05, end: .13, cancel: .145, range: 66, h: 51, y: -61, damage: 5.9, kbX: 88, kbY: 42, reaction: "air", rough: true },
+    { name: "Drop Elbow", duration: .27, start: .065, end: .15, cancel: .17, range: 60, h: 58, y: -54, damage: 6.8, kbX: 90, kbY: -220, reaction: "air", rough: true },
+    { name: "Double Fist", duration: .3, start: .08, end: .19, cancel: .21, range: 70, h: 58, y: -69, damage: 8, kbX: 118, kbY: 62, reaction: "air", rough: true },
+    { name: "Fever Axe", duration: .44, start: .13, end: .275, cancel: .3, range: 72, h: 73, y: -50, damage: 13, kbX: 85, kbY: -780, reaction: "slam", downslam: true, strong: true, finisher: true, rough: true },
+  ];
+  const hakariJackpotGroundChain = [
+    { ...hakariGroundChain[0], name: "Afterimage Fist", duration: .15, damage: 5.8, range: 58 },
+    { ...hakariGroundChain[1], name: "Double Body Blow", duration: .18, damage: 7.2, range: 68 },
+    { ...hakariGroundChain[2], name: "Knee into Elbow", duration: .2, damage: 8.1, range: 65 },
+    { ...hakariGroundChain[3], name: "Dash-Through Punch", duration: .22, damage: 9.5, range: 92, kbX: 65 },
+    { ...hakariGroundChain[4], name: "Jackpot Uppercut", duration: .32, damage: 16, kbX: 110, kbY: 720, reaction: "launcher", launcher: true, jumpCancel: true },
+  ];
 
   function characterProfile(entity = game.player) {
     return characters[entity?.character || selectedCharacter] || characters.gojo;
   }
 
   function characterChains(entity = game.player) {
-    return entity?.character === "sukuna"
-      ? { ground: sukunaGroundChain, air: sukunaAirChain }
-      : { ground: groundChain, air: airChain };
+    if (entity?.character === "sukuna") return { ground: sukunaGroundChain, air: sukunaAirChain };
+    if (entity?.character === "hakari") return { ground: entity.jackpot > 0 ? hakariJackpotGroundChain : hakariGroundChain, air: hakariAirChain };
+    return { ground: groundChain, air: airChain };
   }
 
   function initAudio() {
@@ -309,13 +354,17 @@
       blackFlashWindow: 0, blackFlashTarget: null, blackFlashes: 0,
       stun: 0, invuln: 0, blocking: false, guardStart: 0,
       parryStreak: 0, parryTimer: 0,
-      cooldowns: { blue: 0, red: 0, purple: 0, domain: 0 },
+      cooldowns: { blue: 0, red: 0, purple: 0, domain: 0, consecutive: 0 },
       awakening: 0, canAwaken: false, trailTimer: 0,
       lastHit: "READY", damageScale: 1, flash: 0,
       regenBoost: 0, damageRegen: 0, dashCooldown: 0, recoveryUsed: false,
       fastFalling: false, momentum: 0,
       burnout: 0, burnoutSmoke: 0,
       damageDealt: 0, pressure: 0, voiceCooldown: 0,
+      heat: 0, jackpot: 0, parryHot: 0,
+      nextM1Fast: false,
+      rewindWindow: 0, rewindX: 0, rewindY: 0, rewindHealth: 100,
+      jackpotFinisher: false,
     };
   }
 
@@ -350,6 +399,7 @@
       grounded: true, state: "idle", stateTime: 0, attack: null,
       stun: 0, invuln: 0, flash: 0, blocking: false,
       reaction: "idle", wallSplat: 0, awakening: 0, burnout: 0,
+      heat: 0, jackpot: 0,
       comboStep: -1, airComboStep: -1,
       adaptation: { light: 0, heavy: 0, special: 0, parryBaits: 0 },
       lastPlayerStrategy: "",
@@ -444,7 +494,10 @@
   function matchupDialogue(localCharacter, remoteCharacter) {
     if (localCharacter === "sukuna" && remoteCharacter === "gojo") return "SUKUNA: COME ON, STRONGEST. ENTERTAIN ME.";
     if (localCharacter === "gojo" && remoteCharacter === "sukuna") return "GOJO: LET'S SETTLE WHO STANDS AT THE TOP.";
+    if (localCharacter === "hakari" && remoteCharacter === "gojo") return "HAKARI: LET'S SEE IF THE STRONGEST CAN BEAT LUCK.";
+    if (localCharacter === "hakari" && remoteCharacter === "sukuna") return "HAKARI: EVEN A KING CAN LOSE A BAD BET.";
     if (localCharacter === "sukuna") return "SUKUNA: YOU NEVER STOOD A CHANCE.";
+    if (localCharacter === "hakari") return "HAKARI: FEELING LUCKY?";
     return "GOJO: THIS SHOULD BE INTERESTING.";
   }
 
@@ -542,13 +595,17 @@
     game.unstablePurple = null;
     game.purpleExplosion = 0;
     game.realityCrack = 0;
+    game.hakariDomain = null;
+    game.jackpotFlash = 0;
     resetProps();
     ui.menu.classList.add("hidden");
     ui.result.classList.add("hidden");
     ui.pause.classList.add("hidden");
     ui.clash.classList.add("hidden");
     ui.hud.classList.remove("hidden");
-    announce(selectedMode === "training" ? "TRAINING START" : selectedCharacter === "sukuna" ? "THE KING ENTERS" : "CURTAIN OPEN");
+    announce(selectedMode === "training" ? "TRAINING START"
+      : selectedCharacter === "sukuna" ? "THE KING ENTERS"
+        : selectedCharacter === "hakari" ? "FEVER START" : "CURTAIN OPEN");
     updateHud();
     tone(110, .35, "sawtooth", .25, 330);
   }
@@ -647,7 +704,11 @@
       startM1(aerial);
       return;
     } else {
-      const attack = p.character === "sukuna"
+      const attack = p.character === "hakari"
+        ? aerial
+          ? { name: "Fever Dropkick", duration: .45, start: .14, end: .28, range: 74, h: 68, y: -50, damage: 15.5, kbX: 180, kbY: -480, color: "#54f082", strong: true, rough: true }
+          : { name: "Roughhouse Haymaker", duration: .44, start: .16, end: .29, range: 80, h: 64, y: -72, damage: 16, kbX: 330, kbY: 260, color: "#54f082", strong: true, rough: true }
+        : p.character === "sukuna"
         ? aerial
           ? { name: "Cruel Heel", duration: .48, start: .16, end: .3, range: 72, h: 70, y: -52, damage: 16, kbX: 185, kbY: -500, color: "#ff3158", strong: true, slash: true }
           : { name: "King's Backhand", duration: .46, start: .17, end: .3, range: 82, h: 66, y: -74, damage: 16.5, kbX: 340, kbY: 280, color: "#ff3158", strong: true }
@@ -674,12 +735,22 @@
     const directionForward = p.facing > 0 ? keys.has("d") : keys.has("a");
     const directionDown = keys.has("s");
     let attack = { ...chain[step] };
+    if (p.character === "hakari" && p.nextM1Fast) {
+      attack.duration *= .72;
+      attack.start *= .68;
+      attack.end *= .78;
+      p.nextM1Fast = false;
+    }
     if (!aerial && step === 4 && directionForward) {
-      attack = p.character === "sukuna"
+      attack = p.character === "hakari"
+        ? { ...attack, name: "Fever Headbutt", range: 70, damage: 13, kbX: 75, kbY: 660, reaction: "launcher", launcher: true, jumpCancel: true, grab: true }
+        : p.character === "sukuna"
         ? { ...attack, name: "Savage Ascent", range: 68, damage: 12, kbX: 70, kbY: 680, reaction: "launcher", launcher: true, jumpCancel: true, grab: true }
         : { ...attack, name: "Rising Limit", kbX: 95, kbY: 610, reaction: "launcher", launcher: true, jumpCancel: true };
     } else if (!aerial && step === 4 && directionDown) {
-      attack = p.character === "sukuna"
+      attack = p.character === "hakari"
+        ? { ...attack, name: "Lucky Floor Slam", y: -53, h: 67, damage: 14, kbX: 38, kbY: -610, reaction: "slam", downslam: true, groundFollow: true, bounce: true }
+        : p.character === "sukuna"
         ? { ...attack, name: "Shrine Breaker", y: -54, h: 66, damage: 14, kbX: 45, kbY: -820, reaction: "slam", downslam: true, groundFollow: true }
         : { ...attack, name: "Void Downslam", y: -54, h: 62, kbX: 75, kbY: -720, reaction: "slam", downslam: true };
     }
@@ -694,7 +765,7 @@
       aerial,
       specialCancel: true,
       hitConfirmed: false,
-      color: p.character === "sukuna" ? (attack.slash ? "#ff244f" : "#ff7892") : attack.flashEligible ? "#9cefff" : "#78eaff",
+      color: p.character === "hakari" ? "#55f087" : p.character === "sukuna" ? (attack.slash ? "#ff244f" : "#ff7892") : attack.flashEligible ? "#9cefff" : "#78eaff",
     };
     p.bufferedAttack = "";
     p.attackBuffer = 0;
@@ -799,7 +870,7 @@
     if (p.character === "gojo" && p.burnout > 0 && (name === "blue" || name === "red" || name === "domain")) return;
     const canSpecialCancel = p.attack?.hitConfirmed && p.attack.specialCancel && p.attack.elapsed >= p.attack.start;
     if (p.attack && !canSpecialCancel) return;
-    if (p.cooldowns[name] > 0 || p.energy < profile.costs[name]) {
+    if (p.cooldowns[name] > 0 || (p.jackpot <= 0 && p.energy < profile.costs[name])) {
       tone(70, .06, "square", .12, -20);
       return;
     }
@@ -808,11 +879,13 @@
       game.score += 150;
     }
     const cooldownScale = p.awakening > 0 ? .52 : 1;
-    p.energy -= profile.costs[name];
-    p.cooldowns[name] = profile.cooldowns[name] * cooldownScale;
+    if (p.jackpot <= 0) p.energy -= profile.costs[name];
+    p.cooldowns[name] = profile.cooldowns[name] * cooldownScale * (p.jackpot > 0 ? .28 : 1);
     p.blocking = false;
 
-    if (p.character === "sukuna") {
+    if (p.character === "hakari") {
+      useHakariTechnique(name);
+    } else if (p.character === "sukuna") {
       useSukunaTechnique(name);
     } else if (name === "blue") {
       p.attack = { name: "Lapse: Blue", elapsed: 0, duration: .58, start: .22, end: .36, active: false, hit: new Set(), type: "blue" };
@@ -910,6 +983,81 @@
     } else if (name === "domain") {
       activateDomain();
     }
+  }
+
+  function useHakariTechnique(name) {
+    const p = game.player;
+    if (name === "red") {
+      p.attack = {
+        name: "Rough Cursed Punch", elapsed: 0, duration: p.jackpot > 0 ? .3 : .44,
+        start: p.jackpot > 0 ? .08 : .14, end: p.jackpot > 0 ? .2 : .3,
+        active: false, hit: new Set(), type: "roughPunch", specialCancel: true,
+        range: 96, h: 65, y: -72, damage: p.jackpot > 0 ? 18 : 14.5,
+        kbX: 270, kbY: 120, reaction: "body", color: "#55f087",
+        strong: true, rough: true, armor: true,
+      };
+      p.vx = p.facing * (p.jackpot > 0 ? 620 : 490);
+      p.invuln = Math.max(p.invuln, .08);
+      p.heat = Math.min(100, p.heat + 7);
+      p.state = "roughPunch";
+      tone(125, .16, "square", .26, 160);
+    } else if (name === "blue") {
+      const roll = Math.random() + p.heat / 350 + (game.hakariDomain?.bonus || 0) * .03;
+      const rarity = roll > .92 ? "gold" : roll > .66 ? "red" : "green";
+      const count = p.jackpot > 0 ? 3 : 1;
+      p.attack = { name: `${rarity.toUpperCase()} Shutter Doors`, elapsed: 0, duration: .48, start: .14, end: .3, active: false, hit: new Set(), type: "doors" };
+      p.state = "doors";
+      for (let i = 0; i < count; i++) {
+        const projectile = {
+          owner: "player", type: "door", rarity,
+          x: p.x + p.facing * (105 + i * 78), y: GROUND - 64,
+          vx: 0, vy: 0, w: 44, h: 128, life: .72 + i * .1,
+          damage: rarity === "gold" ? 20 : rarity === "red" ? 15 : 11,
+          kbX: rarity === "gold" ? 420 : 270, kbY: 110, strong: rarity !== "green",
+        };
+        game.projectiles.push(projectile);
+        sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+      }
+      if (game.hakariDomain) game.hakariDomain.bonus += rarity === "gold" ? 3 : rarity === "red" ? 1.2 : .5;
+      p.heat = Math.min(100, p.heat + (rarity === "gold" ? 12 : 5));
+      announce(`${rarity.toUpperCase()} SHUTTER DOORS`);
+      tone(rarity === "gold" ? 720 : rarity === "red" ? 430 : 260, .2, "square", .2, -120);
+    } else if (name === "purple") {
+      const count = p.jackpot > 0 ? 5 : 1;
+      p.attack = { name: "Reserve Balls", elapsed: 0, duration: .34, start: .08, end: .2, active: false, hit: new Set(), type: "reserveBall" };
+      p.state = "cast";
+      for (let i = 0; i < count; i++) {
+        const projectile = {
+          owner: "player", type: "reserveBall",
+          x: p.x + p.facing * 44, y: p.y - 72 - i * 8,
+          vx: p.facing * (520 + i * 45), vy: -140 + i * 55,
+          w: 20, h: 20, life: 2.4, damage: 7.2, kbX: 130, kbY: 45,
+          bounces: 2, strong: false,
+        };
+        game.projectiles.push(projectile);
+        sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+      }
+      if (game.hakariDomain) game.hakariDomain.bonus += p.jackpot > 0 ? 2 : .8;
+      p.heat = Math.min(100, p.heat + 4);
+      tone(510, .12, "square", .16, 100);
+    } else if (name === "domain") {
+      activateDomain();
+    }
+  }
+
+  function consecutiveEffect() {
+    const p = game.player;
+    if (!p || p.character !== "hakari" || p.stun > 0 || p.rewindWindow > 0) return;
+    if (p.cooldowns.consecutive > 0) return;
+    p.rewindX = p.x;
+    p.rewindY = p.y;
+    p.rewindHealth = p.health;
+    p.rewindWindow = p.jackpot > 0 || game.hakariDomain ? .72 : .44;
+    p.cooldowns.consecutive = p.jackpot > 0 ? 1.4 : game.hakariDomain ? 2.4 : 8.5;
+    p.heat = Math.min(100, p.heat + 6);
+    announce("CONSECUTIVE EFFECT");
+    spawnParticles(p.x, p.y - 55, "#5cff91", 18, 240, 5, .5);
+    tone(620, .18, "sine", .2, -250);
   }
 
   function createUnstablePurple(blue, red) {
@@ -1054,10 +1202,10 @@
         beginClash("DOMAIN COLLISION", true);
       }
     }
-    announce(p.character === "sukuna" ? "MALEVOLENT SHRINE" : "DOMAIN EXPANSION");
+    announce(p.character === "sukuna" ? "MALEVOLENT SHRINE" : p.character === "hakari" ? "IDLE DEATH GAMBLE" : "DOMAIN EXPANSION");
     tone(55, 1.5, "sine", .3, 220);
     tone(82, 1.8, "sine", .16, -18);
-    speakLine(p.character === "sukuna" ? "Open your eyes." : "Domain Expansion. Unlimited Void.");
+    speakLine(p.character === "sukuna" ? "Open your eyes." : p.character === "hakari" ? "Let's gamble." : "Domain Expansion. Unlimited Void.");
     setTimeout(() => {
       if (game.state !== "playing") return;
       if (game.online.active && game.domainClashPending) {
@@ -1068,6 +1216,8 @@
         game.enemy.domainUsed = true;
         game.enemy.energy -= 80;
         beginClash("DOMAIN COLLISION", true);
+      } else if (p.character === "hakari") {
+        startHakariDomain();
       } else {
         game.domain = 9;
         p.state = "idle";
@@ -1075,6 +1225,141 @@
         announce(p.character === "sukuna" ? "MALEVOLENT SHRINE" : "UNLIMITED VOID");
       }
     }, 2200);
+  }
+
+  function startHakariDomain() {
+    const p = game.player;
+    game.domain = 14;
+    game.domainCharacter = "hakari";
+    game.hakariDomain = {
+      timer: 14,
+      rollTimer: .9,
+      rollIndex: 0,
+      slots: [1, 3, 7],
+      displaySlots: [1, 3, 7],
+      bonus: p.parryHot + p.heat / 35,
+      nearBonus: 0,
+      damageTaken: 0,
+      result: "rolling",
+      flash: 0,
+    };
+    p.parryHot = 0;
+    p.state = "idle";
+    announce("PACHINKO FEVER");
+    spawnParticles(W / 2, H / 2, "#58ff8c", 70, 500, 7, 1);
+    tone(330, .8, "square", .25, 420);
+  }
+
+  function resolveHakariRoll(forced = "") {
+    const p = game.player;
+    const domain = game.hakariDomain;
+    if (!domain) return;
+    const jackpotChance = clamp(.08 + p.heat * .0028 + domain.bonus * .025 + domain.nearBonus, .08, .72);
+    const nearChance = clamp(.38 + p.heat * .0018 + domain.nearBonus, .35, .78);
+    const roll = Math.random();
+    const result = forced || (roll < jackpotChance ? "jackpot" : roll < nearChance ? "near" : "fail");
+    const number = 1 + Math.floor(Math.random() * 7);
+    if (result === "jackpot") {
+      domain.slots = [number, number, number];
+      domain.displaySlots = [...domain.slots];
+      domain.result = "jackpot";
+      startJackpot();
+    } else if (result === "near") {
+      const miss = number === 7 ? 6 : number + 1;
+      domain.slots = [number, number, miss];
+      domain.displaySlots = [...domain.slots];
+      domain.result = "near";
+      domain.nearBonus = Math.min(.28, domain.nearBonus + .12);
+      domain.bonus += 1.2;
+      p.awakening = Math.max(p.awakening, 3.5);
+      p.heat = Math.min(100, p.heat + 12);
+      announce("REACH! NEAR JACKPOT");
+      tone(580, .35, "square", .23, 260);
+    } else {
+      domain.slots = [1 + Math.floor(Math.random() * 7), 1 + Math.floor(Math.random() * 7), 1 + Math.floor(Math.random() * 7)];
+      domain.displaySlots = [...domain.slots];
+      domain.result = "fail";
+      p.energy = Math.min(100, p.energy + 16);
+      p.stun = Math.max(p.stun, .28);
+      announce("ROLL MISSED");
+      tone(90, .25, "square", .18, -40);
+    }
+    domain.flash = .7;
+    domain.rollIndex++;
+    domain.rollTimer = result === "near" ? 1.6 : 2.4;
+  }
+
+  function startJackpot(fromClash = false) {
+    const p = game.player;
+    p.jackpot = 38;
+    p.energy = 100;
+    p.health = Math.min(100, p.health + 18);
+    p.awakening = 38;
+    p.damageScale = 1.28;
+    p.heat = 100;
+    p.stun = 0;
+    p.jackpotFinisher = false;
+    game.domain = 0;
+    game.domainIntro = 0;
+    game.hakariDomain = null;
+    game.jackpotFlash = 1.3;
+    game.cinematic = .75;
+    game.flash = .4;
+    game.shake = 18;
+    game.cameraTarget = 1.28;
+    announce(fromClash ? "JACKPOT CLASH WIN" : "JACKPOT");
+    spawnParticles(p.x, p.y - 60, "#62ff91", 90, 720, 10, 1.2);
+    spawnParticles(p.x, p.y - 60, "#fff35d", 45, 560, 8, 1);
+    tone(220, 1.1, "square", .35, 660);
+    noise(.35, .2);
+    if (game.online.active) sendOnline("event", { kind: "jackpot", duration: 38 });
+  }
+
+  function shatterHakariDomain(forced = false) {
+    const p = game.player;
+    if (!game.hakariDomain && !forced) return;
+    game.hakariDomain = null;
+    game.domain = 0;
+    p.energy = Math.max(0, p.energy - 28);
+    p.stun = Math.max(p.stun, 1.15);
+    game.shake = 17;
+    game.glitch = .45;
+    announce("GAMBLE SHATTERED");
+    spawnParticles(p.x, p.y - 55, "#53f085", 38, 520, 8, .9);
+  }
+
+  function updateHakariState(dt) {
+    const p = game.player;
+    if (!p || p.character !== "hakari") return;
+    if (p.jackpot > 0) {
+      p.jackpot = Math.max(0, p.jackpot - dt);
+      p.energy = 100;
+      p.health = Math.min(100, p.health + dt * 7.2);
+      p.heat = 100;
+      if (chance(dt * 8)) {
+        spawnParticles(p.x + rnd(-24, 24), p.y - rnd(25, 105), chance(.3) ? "#fff35d" : "#4dff87", 1, 150, 5, .45);
+      }
+      p.cheerTimer = (p.cheerTimer || 0) - dt;
+      if (p.cheerTimer <= 0) {
+        p.cheerTimer = 1.25;
+        tone(chance(.5) ? 660 : 880, .08, "square", .055, 60);
+      }
+      if (p.jackpot <= 0) {
+        p.awakening = 0;
+        p.damageScale = 1;
+        p.energy = 55;
+        p.heat = 62;
+        announce("JACKPOT ENDED");
+      }
+    }
+    const domain = game.hakariDomain;
+    if (!domain) return;
+    domain.timer -= dt;
+    domain.rollTimer -= dt;
+    domain.flash = Math.max(0, domain.flash - dt);
+    domain.displaySlots = domain.displaySlots.map(() => 1 + Math.floor(Math.random() * 7));
+    if (domain.rollTimer <= 0) resolveHakariRoll();
+    if (domain.timer <= 0) shatterHakariDomain();
   }
 
   function speakLine(text) {
@@ -1091,6 +1376,10 @@
 
   function awaken() {
     const p = game.player;
+    if (p?.character === "hakari") {
+      consecutiveEffect();
+      return;
+    }
     const sukunaReady = p?.character === "sukuna" && p.damageDealt >= 55 && p.energy >= 40;
     const gojoReady = p?.character !== "sukuna" && p.energy >= 50 && p.health <= 60;
     if (!p || p.awakening > 0 || (!sukunaReady && !gojoReady)) return;
@@ -1187,6 +1476,14 @@
         attacker.attack = null;
         if (attacker.adaptation) attacker.adaptation.parryBaits++;
         p.energy = Math.min(100, p.energy + 12 * parryMultiplier);
+        if (p.character === "hakari") {
+          p.energy = Math.min(100, p.energy + 8);
+          p.heat = Math.min(100, p.heat + 18);
+          p.parryHot = Math.min(4, p.parryHot + .8);
+          p.nextM1Fast = true;
+          announce("GETTING HOT");
+          tone(430, .2, "square", .22, 210);
+        }
         game.parries++;
         if (game.online.active) game.online.stats.parries++;
         game.slow = .55;
@@ -1213,17 +1510,33 @@
       return true;
     }
 
+    if (isPlayerDefending && p.character === "hakari" && p.rewindWindow > 0) {
+      p.rewindWindow = 0;
+      p.x = p.rewindX;
+      p.y = p.rewindY;
+      p.health = Math.max(p.health, p.rewindHealth - attack.damage * .2);
+      p.stun = .08;
+      p.invuln = .24;
+      p.heat = Math.min(100, p.heat + 12);
+      game.glitch = .18;
+      game.slow = .26;
+      announce("DAMAGE REWOUND");
+      spawnParticles(p.x, p.y - 55, "#65ff97", 28, 330, 6, .6);
+      return true;
+    }
+
     const scale = attacker.kind === "player" ? p.damageScale : attacker.power;
-    const damage = attack.damage * scale;
+    const armored = isPlayerDefending && p.character === "hakari" && p.attack?.armor && !attack.strong;
+    const damage = attack.damage * scale * (armored ? .42 : 1);
     defender.health -= damage;
     defender.vx = attacker.facing * (attack.kbX || 130);
     if (attack.kbY) {
       defender.vy = attack.downslam || attack.reaction === "slam" ? Math.abs(attack.kbY) : -Math.abs(attack.kbY);
       defender.grounded = false;
     }
-    defender.stun = clamp(.12 + damage * .012, .16, .62);
+    defender.stun = armored ? .08 : clamp(.12 + damage * .012, .16, .62);
     defender.flash = .12;
-    defender.attack = null;
+    if (!armored) defender.attack = null;
     defender.reaction = attack.reaction || (!defender.grounded ? "air" : attack.strong ? "body" : "stumble");
     game.hitstop = attack.strong ? .095 : .045;
     game.shake = attack.strong ? 12 : 5;
@@ -1252,12 +1565,21 @@
     if (attacker.kind === "player") {
       p.comboHits++;
       p.comboTimer = 1.25;
-      const aggressionGain = p.character === "sukuna"
+      const aggressionGain = p.character === "hakari"
+        ? (attack.strong ? 6.4 : 4.4) + Math.min(5, p.comboHits * .45)
+        : p.character === "sukuna"
         ? (attack.strong ? 7.5 : 4.1) + Math.min(4, p.comboHits * .35) + (p.awakening > 0 ? 2 : 0)
         : attack.strong ? 5.2 : 2.8;
       p.energy = Math.min(100, p.energy + aggressionGain);
       p.damageDealt += damage;
       if (p.character === "sukuna") p.pressure = Math.min(4, p.pressure + .48 + p.comboHits * .035);
+      if (p.character === "hakari") {
+        p.heat = Math.min(100, p.heat + (attack.strong ? 8 : 4.5) + Math.min(5, p.comboHits * .4));
+        if (attack.rough) {
+          spawnParticles(defender.x, defender.y - defender.h * .55, "#55f087", attack.strong ? 24 : 12, 390, 7, .55);
+          game.shake = Math.max(game.shake, attack.strong ? 13 : 7);
+        }
+      }
       p.regenBoost = Math.max(p.regenBoost, 2.2);
       game.score += Math.round(damage * 125 * Math.max(1, p.comboHits * .08));
       game.maxCombo = Math.max(game.maxCombo, p.comboHits);
@@ -1293,6 +1615,13 @@
       }
     } else {
       p.damageRegen = 4;
+      if (p.character === "hakari" && p.health > 0) {
+        p.heat = Math.min(100, p.heat + damage * .55);
+        if (game.hakariDomain) {
+          game.hakariDomain.damageTaken += damage;
+          if (game.hakariDomain.damageTaken >= 38) shatterHakariDomain();
+        }
+      }
       p.parryStreak = 0;
       p.parryTimer = 0;
     }
@@ -1351,6 +1680,7 @@
   function updatePlayer(dt) {
     const p = game.player;
     const e = game.enemy;
+    updateHakariState(dt);
     p.stateTime += dt;
     p.stun = Math.max(0, p.stun - dt);
     p.invuln = Math.max(0, p.invuln - dt);
@@ -1366,13 +1696,15 @@
     p.burnout = Math.max(0, p.burnout - dt);
     p.burnoutSmoke = Math.max(0, p.burnoutSmoke - dt);
     p.voiceCooldown = Math.max(0, p.voiceCooldown - dt);
+    p.rewindWindow = Math.max(0, p.rewindWindow - dt);
     p.pressure = Math.max(0, p.pressure - dt * .35);
+    if (p.character === "hakari" && p.jackpot <= 0) p.heat = Math.max(0, p.heat - dt * .42);
     p.parryTimer = Math.max(0, p.parryTimer - dt);
     if (p.parryTimer <= 0) p.parryStreak = 0;
     if (p.comboTimer <= 0) p.comboHits = 0;
     p.awakening = Math.max(0, p.awakening - dt);
     if (p.awakening <= 0) p.damageScale = 1;
-    p.canAwaken = p.awakening <= 0 && (p.character === "sukuna"
+    p.canAwaken = p.character !== "hakari" && p.awakening <= 0 && (p.character === "sukuna"
       ? p.damageDealt >= 55 && p.energy >= 40
       : p.health <= 60 && p.energy >= 50);
     for (const name of Object.keys(p.cooldowns)) p.cooldowns[name] = Math.max(0, p.cooldowns[name] - dt);
@@ -1392,7 +1724,7 @@
 
     if (p.stun <= 0 && !p.attack && game.cinematic <= 0) {
       const move = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
-      const speed = (p.awakening > 0 ? (p.character === "sukuna" ? 385 : 360) : p.character === "sukuna" ? 312 : 295) * (p.burnout > 0 ? .58 : 1);
+      const speed = (p.jackpot > 0 ? 402 : p.awakening > 0 ? (p.character === "sukuna" ? 385 : 360) : p.character === "sukuna" ? 312 : p.character === "hakari" ? 318 : 295) * (p.burnout > 0 ? .58 : 1);
       if (move) {
         const acceleration = p.grounded ? 9.5 : 4.2;
         p.vx = lerp(p.vx, move * speed, clamp(dt * acceleration, 0, 1));
@@ -1401,7 +1733,7 @@
         if (p.grounded) p.state = "run";
         p.trailTimer -= dt;
         if (p.awakening > 0 && p.trailTimer <= 0) {
-          addAfterimage(p, p.character === "sukuna" ? "#ff3158" : "#a7efff");
+          addAfterimage(p, p.character === "sukuna" ? "#ff3158" : p.character === "hakari" ? "#5cff91" : "#a7efff");
           p.trailTimer = .09;
         }
       } else {
@@ -1461,7 +1793,7 @@
     }
 
     if (!p.attack && Math.abs(e.x - p.x) > 18) p.facing = e.x > p.x ? 1 : -1;
-    updateAttack(p, e, dt * (p.awakening > 0 ? (p.character === "sukuna" ? 1.2 : 1.13) : 1));
+    updateAttack(p, e, dt * (p.jackpot > 0 ? 1.3 : p.awakening > 0 ? (p.character === "sukuna" ? 1.2 : 1.13) : 1));
   }
 
   function updateEnemy(dt) {
@@ -1472,7 +1804,7 @@
       updateRemotePlayer(dt);
       return;
     }
-    const domainSlow = game.domain > 0 ? .27 : 1;
+    const domainSlow = game.domain > 0 && game.domainCharacter === "gojo" ? .27 : 1;
     dt *= domainSlow;
     e.stateTime += dt;
     e.stun = Math.max(0, e.stun - dt);
@@ -1581,6 +1913,8 @@
     e.blocking = target.blocking;
     e.awakening = target.awakening;
     e.burnout = target.burnout;
+    e.heat = target.heat || 0;
+    e.jackpot = target.jackpot || 0;
     e.comboStep = target.comboStep;
     e.airComboStep = target.airComboStep;
     e.attack = target.attack ? { ...target.attack, hit: new Set() } : null;
@@ -1622,7 +1956,8 @@
 
   function beginClash(type, domain, kind = "power", remoteStart = false) {
     if (game.clash) return;
-    game.clash = { timer: domain ? 4 : 3.2, maxTimer: domain ? 4 : 3.2, power: 50, lastKey: "", domain, kind, pulse: 0 };
+    const hakari = domain && game.player.character === "hakari";
+    game.clash = { timer: domain ? 4 : 3.2, maxTimer: domain ? 4 : 3.2, power: 50, lastKey: "", domain, kind, pulse: 0, hakari };
     game.cinematic = 0;
     game.player.attack = null;
     game.enemy.attack = null;
@@ -1634,7 +1969,10 @@
     game.cameraTarget = 1.24;
     game.cameraFocusX = (game.player.x + game.enemy.x) / 2;
     game.cameraFocusY = GROUND - 80;
-    if (domain && game.online.active && game.online.localCharacter !== game.online.remoteCharacter) {
+    if (domain && hakari) {
+      speakLine("One jackpot is all I need.");
+      announce("JACKPOT RACE");
+    } else if (domain && game.online.active && game.online.localCharacter !== game.online.remoteCharacter) {
       speakLine(game.player.character === "sukuna" ? "Open your eyes." : "Your domain ends here.");
       announce(game.player.character === "sukuna" ? "SHRINE VS VOID" : "VOID VS SHRINE");
     }
@@ -1677,25 +2015,28 @@
 
   function resolveClash(won) {
     const wasDomain = game.clash.domain;
+    const hakariClash = game.clash.hakari;
     game.clash = null;
     ui.clash.classList.add("hidden");
     game.flash = .24;
     game.shake = 18;
     game.cameraTarget = 1;
     if (won) {
-      announce("CLASH WON");
-      game.enemy.health -= wasDomain ? 24 : 18;
+      announce(hakariClash ? "JACKPOT CLASH WON" : "CLASH WON");
+      game.enemy.health -= wasDomain ? (hakariClash ? 12 : 24) : 18;
       game.enemy.stun = 1.5;
       game.enemy.vx = game.player.facing * 680;
       game.score += wasDomain ? 3500 : 1800;
-      if (wasDomain) game.domain = 8;
+      if (hakariClash) startJackpot(true);
+      else if (wasDomain) game.domain = 8;
       spawnParticles(game.enemy.x, game.enemy.y - 55, "#65e9ff", 42, 560, 8, 1);
     } else {
-      announce("LIMIT BROKEN");
-      game.player.health -= wasDomain ? 22 : 15;
-      game.player.stun = 1.25;
+      announce(hakariClash ? "GAMBLE OVERWHELMED" : "LIMIT BROKEN");
+      game.player.health -= wasDomain ? (hakariClash ? 12 : 22) : 15;
+      game.player.stun = hakariClash ? 1.65 : 1.25;
       game.player.vx = -game.player.facing * 520;
-      if (wasDomain) game.domain = 0;
+      if (hakariClash) shatterHakariDomain(true);
+      else if (wasDomain) game.domain = 0;
       spawnParticles(game.player.x, game.player.y - 55, "#ff4d7a", 40, 520, 8, 1);
     }
     tone(won ? 520 : 75, .45, "sawtooth", .3, won ? 360 : -30);
@@ -1713,6 +2054,23 @@
       o.life -= dt;
       o.x += o.vx * dt;
       o.y += o.vy * dt;
+      if (o.type === "reserveBall") {
+        o.vy += 520 * dt;
+        const hitWall = o.x <= 12 || o.x >= W - 12;
+        const hitFloor = o.y >= GROUND - 10;
+        if ((hitWall || hitFloor) && o.bounces > 0) {
+          if (hitWall) {
+            o.x = clamp(o.x, 12, W - 12);
+            o.vx *= -.82;
+          }
+          if (hitFloor) {
+            o.y = GROUND - 10;
+            o.vy = -Math.abs(o.vy) * .72;
+          }
+          o.bounces--;
+          spawnParticles(o.x, o.y, "#65ff97", 7, 180, 4, .3);
+        }
+      }
       if (o.visualOnly) {
         if (o.type === "blue" && chance(.35)) spawnParticles(o.x, o.y, "#4e7fff", 1, 80, 3, .3);
         if (o.life <= 0 || o.x < -300 || o.x > W + 300) game.projectiles.splice(i, 1);
@@ -1745,12 +2103,15 @@
           red: "Reversal: Red",
           dismantle: "Dismantle",
           worldSlash: "World Slash",
+          door: "Shutter Doors",
+          reserveBall: "Reserve Ball",
         };
         applyHit(attacker, target, {
           name: projectileNames[o.type] || "Cursed Shot",
           type: "special", damage: o.damage, kbX: o.kbX, kbY: o.kbY, strong: o.strong,
-          reaction: o.type === "dismantle" || o.type === "worldSlash" ? "slash" : undefined,
-          color: o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
+          reaction: o.type === "dismantle" || o.type === "worldSlash" ? "slash" : o.type === "door" ? "body" : undefined,
+          color: o.type === "door" || o.type === "reserveBall" ? "#55f087"
+            : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
             : o.owner === "player" ? (o.type === "red" ? "#ff315f" : "#8d55ff") : "#ff4c73",
         });
         if (o.type === "purple") {
@@ -1898,6 +2259,7 @@
     game.glitch = Math.max(0, game.glitch - dt);
     game.purpleExplosion = Math.max(0, game.purpleExplosion - dt);
     game.realityCrack = Math.max(0, game.realityCrack - dt);
+    game.jackpotFlash = Math.max(0, game.jackpotFlash - dt);
     game.online.localDomainWindow = Math.max(0, game.online.localDomainWindow - dt);
     game.online.remoteDomainWindow = Math.max(0, game.online.remoteDomainWindow - dt);
     game.domain = Math.max(0, game.domain - dt);
@@ -1945,9 +2307,24 @@
       game.outcomePending = true;
       e.health = 0;
       e.stun = 3;
-      game.transition = 1.5;
+      const jackpotFinish = p.character === "hakari" && p.jackpot > 0;
+      game.transition = jackpotFinish ? 2.25 : 1.5;
       game.score += Math.round(game.time * 35 + p.health * 20);
-      announce("CURSE EXORCISED");
+      if (jackpotFinish) {
+        p.jackpotFinisher = true;
+        p.state = "jackpotFinish";
+        p.vx = p.facing * 620;
+        game.cinematic = 1.85;
+        game.cameraTarget = 1.36;
+        game.cameraFocusX = (p.x + e.x) / 2;
+        game.cameraFocusY = GROUND - 70;
+        game.shake = 19;
+        spawnParticles(e.x, e.y - 55, "#55ff89", 70, 720, 10, 1.1);
+        announce("JACKPOT FINISH");
+        tone(130, .65, "square", .34, 520);
+      } else {
+        announce("CURSE EXORCISED");
+      }
     }
 
     if ((p.health <= 0 || game.time <= 0) && !game.outcomePending) {
@@ -2113,18 +2490,23 @@
     ui.enemyLag.style.transform = `scaleX(${clamp(e.lagHealth / e.maxHealth, 0, 1)})`;
     ui.enemyEnergy.style.transform = `scaleX(${e.energy / 100})`;
     ui.playerName.textContent = profile.name;
-    ui.playerPortrait.className = `portrait ${p.character === "sukuna" ? "sukuna-portrait" : "gojo-portrait"}`;
-    ui.playerPortrait.querySelector("span").textContent = p.character === "sukuna" ? "SK" : "VI";
+    const playerPortrait = p.character === "sukuna" ? "sukuna-portrait" : p.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
+    const playerMark = p.character === "sukuna" ? "SK" : p.character === "hakari" ? "HK" : "VI";
+    ui.playerPortrait.className = `portrait ${playerPortrait}`;
+    ui.playerPortrait.querySelector("span").textContent = playerMark;
     ui.enemyName.textContent = game.online.active ? enemyProfile.name : e.type.name;
     ui.enemyState.textContent = game.online.active ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}` : e.type.rank;
-    ui.enemyPortrait.className = `portrait ${game.online.active ? e.character === "sukuna" ? "sukuna-portrait" : "gojo-portrait" : "curse-portrait"}`;
-    ui.enemyPortrait.querySelector("span").textContent = game.online.active ? e.character === "sukuna" ? "SK" : "VI" : "CR";
+    const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
+    const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : "VI";
+    ui.enemyPortrait.className = `portrait ${game.online.active ? enemyPortrait : "curse-portrait"}`;
+    ui.enemyPortrait.querySelector("span").textContent = game.online.active ? enemyMark : "CR";
     ui.playerState.textContent = game.online.active
-      ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}`
+      ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
       : p.awakening > 0
-      ? `${p.character === "sukuna" ? "KING OF CURSES" : "AWAKENED"} ${p.awakening.toFixed(1)}s`
+      ? `${p.character === "sukuna" ? "KING OF CURSES" : p.character === "hakari" ? "JACKPOT MODE" : "AWAKENED"} ${p.awakening.toFixed(1)}s`
       : p.burnout > 0 ? `BURNT OUT ${p.burnout.toFixed(1)}s`
         : p.canAwaken ? "AWAKENING READY" : profile.title;
+    if (ui.fControl) ui.fControl.innerHTML = `<kbd>F</kbd> ${p.character === "hakari" ? "CONSECUTIVE EFFECT" : "AWAKEN"}`;
     ui.timer.textContent = game.mode === "training" ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
     ui.mode.textContent = game.mode.toUpperCase();
     ui.wave.textContent = game.online.active ? `P${game.online.slot} / ${Math.max(0, Math.round(game.online.startAt - Date.now())) > 0 ? "SYNC" : "LIVE"}`
@@ -2155,11 +2537,11 @@
       el.querySelector("i").style.transform = `scaleX(${ratio})`;
       el.querySelector("span").textContent = profile.labels[name];
       const burntOutLock = p.character === "gojo" && p.burnout > 0 && (name === "blue" || name === "red" || name === "domain");
-      const purpleReady = p.character === "sukuna" || name !== "purple" || (game.unstablePurple?.state === "unstable");
+      const purpleReady = p.character !== "gojo" || name !== "purple" || (game.unstablePurple?.state === "unstable");
       el.classList.toggle("locked", p.energy < cost || cd > 0 || burntOutLock || !purpleReady);
       const hint = el.querySelector("b");
       if (hint && name === "purple") {
-        hint.textContent = p.character === "sukuna"
+        hint.textContent = p.character !== "gojo"
           ? `${cost} CE`
           : game.unstablePurple?.state === "unstable" ? "READY" : game.unstablePurple?.state === "firing" ? "FIRING" : "FUSE B+R";
       }
@@ -2175,8 +2557,25 @@
       ui.purpleStatus.classList.add("hidden");
     }
 
+    if (p.character === "hakari") {
+      ui.heatStatus.classList.remove("hidden");
+      ui.heatStatus.classList.toggle("jackpot", p.jackpot > 0);
+      ui.heatMeter.style.transform = `scaleX(${clamp(p.heat / 100, 0, 1)})`;
+      ui.heatValue.textContent = p.jackpot > 0 ? `${p.jackpot.toFixed(1)}s` : `${Math.round(p.heat)}%`;
+      ui.heatHint.textContent = p.jackpot > 0
+        ? "UNLIMITED CURSED ENERGY / AUTO HEAL"
+        : game.hakariDomain
+          ? `${game.hakariDomain.displaySlots.join(" - ")} / ROLL ${game.hakariDomain.rollIndex + 1}`
+          : p.rewindWindow > 0
+            ? "CONSECUTIVE EFFECT ARMED"
+            : `DOMAIN ODDS ${Math.round(clamp(8 + p.heat * .28 + p.parryHot * 2.5, 8, 72))}%`;
+    } else {
+      ui.heatStatus.classList.add("hidden");
+      ui.heatStatus.classList.remove("jackpot");
+    }
+
     ui.training.textContent = game.mode === "training"
-      ? `${p.lastHit}\nM1 ${Math.max(0, p.comboStep + 1)}/5  COMBO ${p.comboHits}\nENERGY ${p.energy.toFixed(1)}${p.burnout > 0 ? `  BURNOUT ${p.burnout.toFixed(1)}s` : ""}\nPARRY 6F  STREAK x${p.parryStreak}\n${game.unstablePurple ? `PURPLE ${game.unstablePurple.timer.toFixed(2)}s` : p.blackFlashWindow > 0 ? `BLACK FLASH ${(p.blackFlashWindow * 60).toFixed(1)}F` : p.attack?.hitConfirmed ? "HIT CONFIRMED" : "NEUTRAL"}\n${p.grounded ? `MOMENTUM ${(p.momentum * 100).toFixed(0)}%` : `AIRBORNE  VY ${p.vy.toFixed(0)}`}`
+      ? `${p.lastHit}\nM1 ${Math.max(0, p.comboStep + 1)}/5  COMBO ${p.comboHits}\nENERGY ${p.energy.toFixed(1)}${p.character === "hakari" ? `  HEAT ${p.heat.toFixed(0)}%` : p.burnout > 0 ? `  BURNOUT ${p.burnout.toFixed(1)}s` : ""}\nPARRY 6F  STREAK x${p.parryStreak}\n${p.jackpot > 0 ? `JACKPOT ${p.jackpot.toFixed(2)}s` : game.hakariDomain ? `ROLL ${game.hakariDomain.displaySlots.join("-")}` : game.unstablePurple ? `PURPLE ${game.unstablePurple.timer.toFixed(2)}s` : p.blackFlashWindow > 0 ? `BLACK FLASH ${(p.blackFlashWindow * 60).toFixed(1)}F` : p.attack?.hitConfirmed ? "HIT CONFIRMED" : "NEUTRAL"}\n${p.grounded ? `MOMENTUM ${(p.momentum * 100).toFixed(0)}%` : `AIRBORNE  VY ${p.vy.toFixed(0)}`}`
       : "";
   }
 
@@ -2570,8 +2969,84 @@
     if (entity.flash > 0 && !tint) drawSukuna(entity, clamp(entity.flash / .12, 0, 1), "#ffffff");
   }
 
+  function drawHakari(entity, alpha = 1, tint = null) {
+    const bob = entity.grounded && entity.state === "idle" ? Math.sin(performance.now() * .008) * 2 : 0;
+    const run = entity.state === "run" ? Math.sin(entity.stateTime * 25) : 0;
+    const attackT = entity.attack ? clamp(entity.attack.elapsed / entity.attack.duration, 0, 1) : 0;
+    const reach = entity.attack ? Math.sin(attackT * Math.PI) : 0;
+    const fever = entity.jackpot > 0;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(Math.round(entity.x), Math.round(entity.y + bob));
+    ctx.scale(entity.facing, 1);
+    if ((entity.heat > 55 || fever) && !tint) {
+      ctx.fillStyle = fever ? "#eaff4938" : "#42ff7b22";
+      ctx.beginPath();
+      ctx.ellipse(0, -52, fever ? 58 : 43, fever ? 78 : 63, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (fever) {
+        for (let i = 0; i < 4; i++) pixelRect(rnd(-42, 42), rnd(-115, -15), rnd(4, 9), rnd(8, 20), i % 2 ? "#fff35d" : "#4dff87");
+      }
+    }
+    const dark = tint || "#171019";
+    const coat = tint || "#4c1767";
+    const coatEdge = tint || "#7e2aa5";
+    const shirt = tint || "#101a15";
+    const skin = tint || "#bd856f";
+    const hair = tint || "#3b172f";
+    const energy = tint || "#55f087";
+    let legA = run * 10;
+    let legB = -run * 10;
+    if (!entity.grounded) { legA = 8; legB = -8; }
+    if (entity.comboStep === 2 && entity.attack?.chain) legA = -18;
+    pixelRect(-18 + legA, -40, 14, 33, dark);
+    pixelRect(4 + legB, -40, 14, 33, dark);
+    pixelRect(-20 + legA, -9, 19, 9, "#09070b");
+    pixelRect(1 + legB, -9, 20, 9, "#09070b");
+    pixelRect(-22, -80, 44, 45, coat);
+    pixelRect(-16, -76, 32, 39, shirt);
+    pixelRect(-22, -78, 6, 40, coatEdge);
+    pixelRect(-17, -44, 34, 7, dark);
+    let frontX = 15, frontY = -71, backX = -24, backY = -71;
+    if (entity.attack) {
+      frontX += reach * (entity.attack.type === "roughPunch" ? 62 : 43);
+      frontY += entity.comboStep === 2 ? reach * 17 : entity.attack.type === "heavy" ? -reach * 20 : 0;
+      if (entity.attack.type === "doors" || entity.attack.type === "reserveBall") backX += reach * 26;
+    } else if (entity.blocking) {
+      frontX = 15; frontY = -86; backX = 2; backY = -77;
+    } else if (entity.state === "run") {
+      frontX -= run * 8;
+      backX += run * 8;
+    }
+    pixelRect(backX, backY, 11, 32, coat);
+    pixelRect(backX + 1, backY + 26, 10, 9, skin);
+    pixelRect(frontX, frontY, 11, 32, coatEdge);
+    pixelRect(frontX + 1, frontY + 26, 10, 9, skin);
+    pixelRect(-16, -106, 32, 32, skin);
+    pixelRect(-18, -113, 8, 20, hair);
+    pixelRect(-12, -119, 9, 25, hair);
+    pixelRect(-4, -121, 9, 27, hair);
+    pixelRect(5, -117, 9, 23, hair);
+    pixelRect(12, -111, 7, 18, hair);
+    pixelRect(-12, -99, 10, 4, "#16080d");
+    pixelRect(4, -99, 10, 4, "#16080d");
+    pixelRect(-8, -86, 17, 4, "#672f34");
+    if (entity.attack?.rough && !tint) {
+      ctx.strokeStyle = energy;
+      ctx.lineWidth = fever ? 8 : 5;
+      ctx.beginPath();
+      ctx.moveTo(19, -74);
+      ctx.lineTo(46 + reach * 55, -68 + rnd(-8, 8));
+      ctx.stroke();
+      for (let i = 0; i < 5; i++) pixelRect(28 + reach * rnd(20, 74), -88 + rnd(-20, 38), rnd(3, 8), rnd(4, 13), i % 2 ? "#52f487" : "#dfff54");
+    }
+    ctx.restore();
+    if (entity.flash > 0 && !tint) drawHakari(entity, clamp(entity.flash / .12, 0, 1), "#ffffff");
+  }
+
   function drawFighter(entity, alpha = 1, tint = null) {
-    if (entity?.character === "sukuna") drawSukuna(entity, alpha, tint);
+    if (entity?.character === "hakari") drawHakari(entity, alpha, tint);
+    else if (entity?.character === "sukuna") drawSukuna(entity, alpha, tint);
     else drawGojo(entity, alpha, tint);
   }
 
@@ -2685,6 +3160,20 @@
         for (let i = 0; i < (o.type === "worldSlash" ? 13 : 5); i++) {
           pixelRect(rnd(-length / 2, length / 2), rnd(-28, 28), rnd(9, 28), rnd(2, 5), "#ff244f");
         }
+      } else if (o.type === "door") {
+        const color = o.rarity === "gold" ? "#ffe95a" : o.rarity === "red" ? "#ff4264" : "#4df083";
+        pixelRect(-22, -64, 44, 128, "#101714");
+        pixelRect(-19, -61, 38, 122, color);
+        for (let y = -52; y < 60; y += 15) pixelRect(-17, y, 34, 5, "#17251c");
+        pixelRect(-4, -61, 8, 122, "#d9ffe4");
+      } else if (o.type === "reserveBall") {
+        ctx.fillStyle = "#52f48755";
+        ctx.beginPath();
+        ctx.arc(0, 0, 17, 0, Math.PI * 2);
+        ctx.fill();
+        pixelRect(-9, -9, 18, 18, "#37c96a");
+        pixelRect(-4, -4, 8, 8, "#e5ff72");
+        pixelRect(-Math.sign(o.vx) * 24, -3, 18, 6, "#55f087");
       } else {
         ctx.rotate(Math.atan2(o.vy, o.vx));
         pixelRect(-o.w / 2, -o.h / 2, o.w, o.h, "#6c183b");
@@ -2798,15 +3287,64 @@
   }
 
   function drawDomain() {
-    if (game.domain <= 0 && game.domainIntro <= 0) return;
+    if (game.domain <= 0 && game.domainIntro <= 0 && !game.clash?.domain) return;
     const intro = game.domainIntro;
     const opacity = intro > 0 ? clamp((2.35 - intro) * .7, 0, .9) : .9;
     ctx.save();
     ctx.globalAlpha = opacity;
     const shrine = game.domainCharacter === "sukuna";
-    ctx.fillStyle = shrine ? "#120306" : "#01010c";
+    const gamble = game.domainCharacter === "hakari";
+    ctx.fillStyle = shrine ? "#120306" : gamble ? "#06130d" : "#01010c";
     ctx.fillRect(0, 0, W, H);
     const t = performance.now() * .001;
+    if (gamble) {
+      ctx.fillStyle = "#091d16";
+      ctx.fillRect(0, 70, W, GROUND - 70);
+      ctx.fillStyle = "#142d25";
+      ctx.fillRect(0, 110, W, 28);
+      ctx.fillRect(0, GROUND - 75, W, 75);
+      ctx.fillStyle = "#326f4d";
+      ctx.fillRect(0, GROUND - 82, W, 7);
+      ctx.fillStyle = "#d8ff5d";
+      for (let x = 25; x < W; x += 58) ctx.fillRect(x, GROUND - 58, 28, 5);
+      for (let i = 0; i < 12; i++) {
+        const x = i * 118 - (t * 150 % 118);
+        ctx.fillStyle = i % 2 ? "#5cff8c" : "#fff35d";
+        ctx.fillRect(x, 84, 72, 10);
+        ctx.fillStyle = "#183b2b";
+        ctx.fillRect(x + 8, 147, 90, 92);
+        ctx.fillStyle = "#9dfbc155";
+        ctx.fillRect(x + 14, 154, 34, 68);
+        ctx.fillRect(x + 56, 154, 34, 68);
+      }
+      ctx.fillStyle = "#0b0e14";
+      ctx.fillRect(0, GROUND - 18, W, 18);
+      ctx.fillStyle = "#777f75";
+      ctx.fillRect(0, GROUND - 14, W, 3);
+      ctx.fillRect(0, GROUND - 5, W, 3);
+      for (let i = 0; i < 20; i++) {
+        const x = (i * 83 + t * 85) % W;
+        pixelRect(x, 50 + Math.sin(t * 3 + i) * 18, 5, 12, i % 3 ? "#58ff8c" : "#fff35d");
+      }
+      const slots = game.hakariDomain?.displaySlots || [7, 7, 7];
+      ctx.textAlign = "center";
+      ctx.font = '36px "Press Start 2P", monospace';
+      slots.forEach((number, index) => {
+        const x = W / 2 - 142 + index * 142;
+        ctx.fillStyle = "#050907dd";
+        ctx.fillRect(x - 48, 252, 96, 92);
+        ctx.strokeStyle = index === 1 ? "#fff35d" : "#58ff8c";
+        ctx.lineWidth = 5;
+        ctx.strokeRect(x - 48, 252, 96, 92);
+        ctx.fillStyle = number === 7 ? "#fff35d" : "#d9ffe5";
+        ctx.fillText(String(number), x, 318);
+      });
+      ctx.font = '11px "Press Start 2P", monospace';
+      ctx.fillStyle = "#c9ffda";
+      ctx.fillText(game.clash?.hakari ? "HIT JACKPOT BEFORE THE DOMAIN BREAKS" : "IDLE DEATH GAMBLE", W / 2, 225);
+      ctx.restore();
+      return;
+    }
     if (shrine) {
       ctx.fillStyle = "#25060d";
       ctx.fillRect(W / 2 - 170, GROUND - 270, 340, 270);
@@ -2873,11 +3411,22 @@
       ctx.globalAlpha = clamp(Math.sin(progress * Math.PI) * 1.3, 0, 1);
       ctx.textAlign = "center";
       const shrine = game.domainCharacter === "sukuna";
-      ctx.fillStyle = shrine ? "#ffe9ed" : "#eafdff";
+      const gamble = game.domainCharacter === "hakari";
+      ctx.fillStyle = shrine ? "#ffe9ed" : gamble ? "#eaff65" : "#eafdff";
       ctx.font = '28px "Press Start 2P", monospace';
-      ctx.fillText(progress < .56 ? "DOMAIN EXPANSION" : shrine ? "MALEVOLENT SHRINE" : "UNLIMITED VOID", W / 2, 66);
-      ctx.fillStyle = shrine ? "#ff3158" : "#71eaff";
+      ctx.fillText(progress < .56 ? "DOMAIN EXPANSION" : shrine ? "MALEVOLENT SHRINE" : gamble ? "IDLE DEATH GAMBLE" : "UNLIMITED VOID", W / 2, 66);
+      ctx.fillStyle = shrine ? "#ff3158" : gamble ? "#58ff8c" : "#71eaff";
       ctx.fillRect(W / 2 - 150, H - 55, 300 * progress, 3);
+      ctx.restore();
+    } else if (game.player?.jackpotFinisher) {
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#f5ff63";
+      ctx.font = '30px "Press Start 2P", monospace';
+      ctx.fillText("RESTLESS GAMBLER", W / 2, 62);
+      ctx.fillStyle = "#58ff8c";
+      ctx.font = '12px "Press Start 2P", monospace';
+      ctx.fillText("JACKPOT FINISH", W / 2, H - 27);
       ctx.restore();
     }
   }
@@ -2960,6 +3509,18 @@
       }
       ctx.restore();
     }
+    if (game.jackpotFlash > 0 || game.player?.jackpot > 0) {
+      const pulse = game.jackpotFlash > 0
+        ? clamp(game.jackpotFlash / 1.3, 0, 1)
+        : .035 + (Math.sin(performance.now() * .012) + 1) * .018;
+      ctx.fillStyle = `rgba(66,255,118,${pulse * .18})`;
+      ctx.fillRect(0, 0, W, H);
+      if (game.jackpotFlash > 0) {
+        ctx.strokeStyle = `rgba(255,244,82,${pulse * .8})`;
+        ctx.lineWidth = 9;
+        ctx.strokeRect(12 + (1 - pulse) * 40, 12 + (1 - pulse) * 40, W - 24 - (1 - pulse) * 80, H - 24 - (1 - pulse) * 80);
+      }
+    }
     if (game.purpleExplosion > 0) {
       const phase = game.purpleExplosion / .85;
       ctx.fillStyle = `rgba(102,35,190,${phase * .36})`;
@@ -3023,6 +3584,7 @@
       state: p.state, blocking: p.blocking,
       health: Math.max(0, p.health), energy: p.energy,
       awakening: p.awakening, burnout: p.burnout,
+      heat: p.heat, jackpot: p.jackpot,
       comboStep: p.comboStep, airComboStep: p.airComboStep,
       attack,
     };
@@ -3039,6 +3601,12 @@
         p.parryStreak++;
         p.parryTimer = 3;
         p.energy = Math.min(100, p.energy + 12);
+        if (p.character === "hakari") {
+          p.energy = Math.min(100, p.energy + 8);
+          p.heat = Math.min(100, p.heat + 18);
+          p.parryHot = Math.min(4, p.parryHot + .8);
+          p.nextM1Fast = true;
+        }
         game.parries++;
         game.online.stats.parries++;
         game.slow = .55;
@@ -3059,7 +3627,28 @@
       return;
     }
 
-    p.health -= Number(hit.damage || 0);
+    if (p.character === "hakari" && p.rewindWindow > 0) {
+      p.rewindWindow = 0;
+      p.x = p.rewindX;
+      p.y = p.rewindY;
+      p.health = Math.max(p.health, p.rewindHealth - Number(hit.damage || 0) * .2);
+      p.stun = .08;
+      p.invuln = .24;
+      p.heat = Math.min(100, p.heat + 12);
+      game.glitch = .18;
+      announce("DAMAGE REWOUND");
+      return;
+    }
+
+    const incomingDamage = Number(hit.damage || 0);
+    p.health -= incomingDamage;
+    if (p.character === "hakari" && p.health > 0) {
+      p.heat = Math.min(100, p.heat + incomingDamage * .55);
+      if (game.hakariDomain) {
+        game.hakariDomain.damageTaken += incomingDamage;
+        if (game.hakariDomain.damageTaken >= 38) shatterHakariDomain();
+      }
+    }
     p.vx = Number(hit.sourceFacing || 1) * Number(hit.kbX || 130);
     if (hit.kbY) {
       p.vy = hit.downslam ? Math.abs(hit.kbY) : -Math.abs(hit.kbY);
@@ -3124,6 +3713,14 @@
       game.flash = .45;
       game.shake = 28;
       spawnParticles(event.x, event.y, "#a15cff", 70, 760, 12, 1.2);
+    } else if (event.kind === "jackpot") {
+      game.enemy.jackpot = Number(event.duration || 38);
+      game.enemy.awakening = game.enemy.jackpot;
+      game.jackpotFlash = 1.1;
+      game.flash = .3;
+      game.shake = 15;
+      spawnParticles(game.enemy.x, game.enemy.y - 60, "#5cff91", 70, 620, 9, 1);
+      announce("OPPONENT HIT JACKPOT");
     }
   }
 
@@ -3314,6 +3911,11 @@
       jump,
       ability: useAbility,
       applyHit,
+      startHakariDomain,
+      resolveHakariRoll,
+      startJackpot,
+      beginClash,
+      resolveClash,
       keys,
       game,
       selectStage,
@@ -3325,6 +3927,9 @@
           y: game.player.y,
           health: game.player.health,
           energy: game.player.energy,
+          character: game.player.character,
+          heat: game.player.heat,
+          jackpot: game.player.jackpot,
           comboStep: game.player.comboStep,
           comboHits: game.player.comboHits,
           attack: game.player.attack?.name || null,

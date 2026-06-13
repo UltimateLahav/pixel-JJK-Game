@@ -144,6 +144,14 @@
           <strong>RYOMEN SUKUNA</strong>
           <small>RUSHDOWN / COUNTER</small>
         </button>
+        <button class="character-card" data-character="hakari">
+          <div class="pixel-portrait hakari-pixel">
+            <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
+          </div>
+          <span>FEVER</span>
+          <strong>KINJI HAKARI</strong>
+          <small>GAMBLER / BRAWLER</small>
+        </button>
       </div>
       <aside class="character-details">
         <div>
@@ -211,6 +219,11 @@
         <div><i id="purpleTimer"></i></div>
         <small>PRESS Q TO STABILIZE</small>
       </div>
+      <div id="heatStatus" class="heat-status hidden">
+        <span>HAKARI HEAT <b id="heatValue">0%</b></span>
+        <div><i id="heatMeter"></i></div>
+        <small id="heatHint">BUILD PRESSURE / IMPROVE ODDS</small>
+      </div>
       <div id="announcement" class="announcement"></div>
       <div id="trainingData" class="training-data"></div>
       <div class="ability-strip">
@@ -226,7 +239,7 @@
         <span><kbd>M1</kbd> COMBO</span>
         <span><kbd>M2</kbd> HEAVY / FLASH</span>
         <span><kbd>SHIFT</kbd> DASH</span>
-        <span><kbd>F</kbd> AWAKEN</span>
+        <span id="fControl"><kbd>F</kbd> AWAKEN</span>
         <span><kbd>ESC</kbd> PAUSE</span>
       </div>
     </section>

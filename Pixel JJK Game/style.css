@@ -554,7 +554,7 @@ canvas {
 .character-roster {
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 11px;
   min-height: 0;
 }
@@ -584,6 +584,11 @@ canvas {
   border-color: #ff426d;
   box-shadow: 0 0 25px #ff315525, inset 0 -4px #ff426d;
 }
+.character-card[data-character="hakari"]:hover,
+.character-card[data-character="hakari"].active {
+  border-color: #62f08f;
+  box-shadow: 0 0 25px #48ff862b, inset 0 -4px #62f08f;
+}
 .character-card.locked::after {
   content: "LOCKED";
   position: absolute;
@@ -599,6 +604,7 @@ canvas {
 }
 .character-card > span { z-index: 2; color: var(--cyan); font-size: 8px; letter-spacing: 2px; }
 .character-card[data-character="sukuna"] > span { color: #ff557c; }
+.character-card[data-character="hakari"] > span { color: #62f08f; }
 .character-card > strong { z-index: 2; margin-top: 4px; font-size: 16px; letter-spacing: 1px; }
 .character-card > small { z-index: 2; margin-top: 3px; color: #687996; font-size: 8px; letter-spacing: 1px; }
 .pixel-portrait {
@@ -664,6 +670,20 @@ canvas {
   background: #30040f;
   box-shadow: 0 11px #30040f, -10px 19px #681429, 11px 19px #681429;
 }
+.hakari-pixel .portrait-aura { background: radial-gradient(circle, #43ff8255, transparent 66%); }
+.hakari-pixel .portrait-body { background: #331449; box-shadow: inset 11px 0 #5d2383, inset -8px 0 #0b1712; }
+.hakari-pixel .portrait-head { background: #bd856f; box-shadow: -8px 6px #5d2c2d; }
+.hakari-pixel .portrait-hair {
+  top: 11%;
+  background: #3e1832;
+  filter: drop-shadow(6px 6px #171019);
+  clip-path: polygon(0 89%, 4% 37%, 19% 51%, 28% 7%, 42% 43%, 58% 0, 66% 44%, 84% 14%, 77% 57%, 100% 32%, 91% 100%);
+}
+.hakari-pixel .portrait-face {
+  height: 4px;
+  background: #1b090c;
+  box-shadow: 0 12px #57252a, -12px 20px #2ef06b, 12px 20px #2ef06b;
+}
 @keyframes portraitIdle { 50% { transform: translateY(4px); } }
 @keyframes portraitHair { 50% { transform: translate(-2px, -3px) skew(2deg); } }
 @keyframes portraitAura { 50% { transform: scale(1.08); opacity: .6; } }
@@ -706,6 +726,8 @@ canvas {
 .selection-player[data-character="gojo"] { background: linear-gradient(90deg, #102c4ddd, #080e1cdb); }
 .selection-player[data-character="sukuna"] { background: linear-gradient(90deg, #3e101ddd, #080e1cdb); }
 .selection-player[data-character="sukuna"] > span { color: #ff557c; }
+.selection-player[data-character="hakari"] { background: linear-gradient(90deg, #153d25dd, #080e1cdb); }
+.selection-player[data-character="hakari"] > span { color: #62f08f; }
 .select-actions {
   z-index: 1;
   grid-column: 1 / -1;
@@ -784,6 +806,9 @@ canvas {
 .intro-silhouette.sukuna {
   filter: sepia(.8) saturate(3) hue-rotate(310deg) drop-shadow(0 0 24px #ff315588);
 }
+.intro-silhouette.hakari {
+  filter: sepia(.6) saturate(3.2) hue-rotate(75deg) drop-shadow(0 0 26px #58ff8c99);
+}
 .intro-silhouette.inverted {
   filter: invert(1) hue-rotate(120deg) drop-shadow(0 0 24px #ff55ac88);
 }
@@ -860,6 +885,8 @@ canvas {
 .curse-portrait span { color: #ff9ab3; text-shadow: 3px 3px #931b51; }
 .sukuna-portrait { border-color: #ff6688; background: linear-gradient(135deg, #622338, #160b12); }
 .sukuna-portrait span { color: #ffe7e8; text-shadow: 3px 3px #a61539; }
+.hakari-portrait { border-color: #62f08f; background: linear-gradient(135deg, #234c32, #130c1e); }
+.hakari-portrait span { color: #e8ffec; text-shadow: 3px 3px #16773a; }
 .bars { flex: 1; min-width: 0; padding-top: 3px; }
 .name-row { display: flex; justify-content: space-between; align-items: end; height: 22px; }
 .name-row strong { font-size: 15px; letter-spacing: 1px; color: white; }
@@ -1044,6 +1071,23 @@ canvas {
 }
 .purple-status small { color: #bca9dc; font-size: 7px; letter-spacing: 1px; }
 .purple-status.firing { border-color: #f1e5ff; animation: purplePulse .16s alternate infinite; }
+.heat-status {
+  position: absolute;
+  top: 104px;
+  left: 32px;
+  width: 220px;
+  padding: 8px 10px;
+  border: 1px solid #4be17b;
+  background: #06130de8;
+  box-shadow: 0 0 20px #36ff7133;
+}
+.heat-status span { display: flex; justify-content: space-between; color: #caffd8; font-size: 9px; letter-spacing: 1px; }
+.heat-status b { color: #63ff94; }
+.heat-status > div { height: 7px; margin: 5px 0; overflow: hidden; background: #17251c; }
+.heat-status i { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left; background: linear-gradient(90deg, #42c96b, #d5ff55); }
+.heat-status small { color: #6fa57d; font-size: 7px; letter-spacing: .7px; }
+.heat-status.jackpot { border-color: #fff35d; animation: jackpotHud .18s steps(2) infinite; }
+@keyframes jackpotHud { 50% { box-shadow: 0 0 28px #fff24c99; transform: translateY(-1px); } }
 @keyframes purplePulse { to { box-shadow: 0 0 38px #b178ffbb; } }
 .controls {
   position: absolute;
