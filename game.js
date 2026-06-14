@@ -30,6 +30,7 @@
     mode: $("#modeLabel"),
     combo: $("#combo"),
     combatPrompt: $("#combatPrompt"),
+    networkWarning: $("#networkWarning"),
     stageLabel: $("#stageLabel"),
     purpleStatus: $("#purpleStatus"),
     purpleTimer: $("#purpleTimer"),
@@ -98,6 +99,7 @@
   let audioCtx = null;
   let master = null;
   let lastTime = performance.now();
+  let onlineAccumulator = 0;
 
   const game = {
     state: "menu",
@@ -134,9 +136,11 @@
     windPaused: false,
     windTimer: 0,
     unstablePurple: null,
+    remoteUnstablePurple: null,
     purpleExplosion: 0,
     realityCrack: 0,
     domainCharacter: "gojo",
+    domainTick: .5,
     hakariDomain: null,
     jackpotFlash: 0,
     online: {
@@ -153,6 +157,18 @@
       opponentStats: null,
       localDomainWindow: 0,
       remoteDomainWindow: 0,
+      authoritative: true,
+      serverFrame: 0,
+      lastEventTick: -1,
+      interpolationTicks: 6,
+      snapshotBuffer: [],
+      predictionHistory: new Map(),
+      correctionX: 0,
+      correctionY: 0,
+      inputEdges: {
+        jump: false, dash: false, light: false, heavy: false,
+        special: "", domain: false, awaken: false,
+      },
       stats: { damage: 0, parries: 0, blackFlashes: 0, domains: 0 },
     },
   };
@@ -187,8 +203,8 @@
         ["T", "MALEVOLENT SHRINE"],
       ],
       labels: { red: "DISMANTLE", blue: "CLEAVE", purple: "WORLD SLASH", domain: "SHRINE" },
-      costs: { blue: 22, red: 16, purple: 72, domain: 100 },
-      cooldowns: { blue: 5.2, red: 3.4, purple: 12, domain: 24 },
+      costs: { blue: 22, red: 16, purple: 95, domain: 100 },
+      cooldowns: { blue: 5.2, red: 3.4, purple: 15, domain: 24 },
     },
     hakari: {
       id: "hakari",
@@ -365,6 +381,7 @@
       nextM1Fast: false,
       rewindWindow: 0, rewindX: 0, rewindY: 0, rewindHealth: 600,
       jackpotFinisher: false,
+      dismantleUses: 0, cleaveUses: 0, sukunaDomainUses: 0, worldSlashUnlocked: false,
       charging: false, chargeRecovery: 0, chargeCooldown: 0, chargePulse: 0,
     };
   }
@@ -595,9 +612,11 @@
     game.windPaused = false;
     game.windTimer = 0;
     game.unstablePurple = null;
+    game.remoteUnstablePurple = null;
     game.purpleExplosion = 0;
     game.realityCrack = 0;
     game.hakariDomain = null;
+    game.domainTick = .5;
     game.jackpotFlash = 0;
     resetProps();
     ui.menu.classList.add("hidden");
@@ -630,6 +649,16 @@
     game.online.opponentStats = null;
     game.online.localDomainWindow = 0;
     game.online.remoteDomainWindow = 0;
+    game.online.serverFrame = 0;
+    game.online.lastEventTick = -1;
+    game.online.snapshotBuffer.length = 0;
+    game.online.predictionHistory.clear();
+    game.online.correctionX = 0;
+    game.online.correctionY = 0;
+    game.online.inputEdges = {
+      jump: false, dash: false, light: false, heavy: false,
+      special: "", domain: false, awaken: false,
+    };
     game.online.stats = { damage: 0, parries: 0, blackFlashes: 0, domains: 0 };
     game.time = Number(options.time) || 99;
     game.player.energy = Number(options.energy) || 70;
@@ -648,7 +677,13 @@
 
   function sendOnline(channel, payload) {
     if (!game.online.active) return;
+    if (game.online.authoritative && ["state", "hit", "event", "clash", "matchOver"].includes(channel)) return;
     window.VoidLimitNetwork?.send?.(channel, payload);
+  }
+
+  function queueOnlineEdge(name, value = true) {
+    if (!game.online.active || !game.online.authoritative) return;
+    game.online.inputEdges[name] = value;
   }
 
   function quitToMenu() {
@@ -870,6 +905,29 @@
     }
   }
 
+  function updateWorldSlashUnlock(p) {
+    if (!p || p.character !== "sukuna") return false;
+    const unlocked = p.dismantleUses >= 10 && p.cleaveUses >= 5 && p.sukunaDomainUses >= 1;
+    if (unlocked && !p.worldSlashUnlocked) {
+      p.worldSlashUnlocked = true;
+      announce("WORLD-CUTTING SLASH UNLOCKED");
+      game.realityCrack = .35;
+      tone(52, .65, "sawtooth", .3, 220);
+    }
+    return p.worldSlashUnlocked;
+  }
+
+  function abilityTuning(p, name) {
+    const profile = characterProfile(p);
+    if (p?.character === "hakari" && p.jackpot > 0 && name === "blue") {
+      return { cost: 10, cooldown: 11, label: "GAMBLER'S LUCK" };
+    }
+    if (p?.character === "hakari" && p.jackpot > 0 && name === "purple") {
+      return { cost: 8, cooldown: 9, label: "FEVER BREAKER" };
+    }
+    return { cost: profile.costs[name], cooldown: profile.cooldowns[name], label: profile.labels[name] };
+  }
+
   function useAbility(name) {
     const p = game.player;
     const profile = characterProfile(p);
@@ -881,9 +939,16 @@
       return;
     }
     if (p.character === "gojo" && p.burnout > 0 && (name === "blue" || name === "red" || name === "domain")) return;
+    if (p.character === "sukuna" && name === "purple" && !updateWorldSlashUnlock(p)) {
+      announce(`WORLD SLASH LOCKED ${p.dismantleUses}/10 D  ${p.cleaveUses}/5 C  ${p.sukunaDomainUses}/1 DOMAIN`);
+      tone(70, .08, "square", .14, -30);
+      return;
+    }
     const canSpecialCancel = p.attack?.hitConfirmed && p.attack.specialCancel && p.attack.elapsed >= p.attack.start;
     if (p.attack && !canSpecialCancel) return;
-    if (p.cooldowns[name] > 0 || (p.jackpot <= 0 && p.energy < profile.costs[name])) {
+    const tuning = abilityTuning(p, name);
+    const jackpotFinisherMove = p.character === "hakari" && p.jackpot > 0 && (name === "blue" || name === "purple");
+    if (p.cooldowns[name] > 0 || ((!p.jackpot || jackpotFinisherMove) && p.energy < tuning.cost)) {
       tone(70, .06, "square", .12, -20);
       return;
     }
@@ -892,8 +957,10 @@
       game.score += 150;
     }
     const cooldownScale = p.awakening > 0 ? .52 : 1;
-    if (p.jackpot <= 0) p.energy -= profile.costs[name];
-    p.cooldowns[name] = profile.cooldowns[name] * cooldownScale * (p.jackpot > 0 ? .28 : 1);
+    if (p.jackpot <= 0 || jackpotFinisherMove) p.energy -= tuning.cost;
+    p.cooldowns[name] = jackpotFinisherMove
+      ? tuning.cooldown
+      : tuning.cooldown * cooldownScale * (p.jackpot > 0 ? .28 : 1);
     p.blocking = false;
 
     if (p.character === "hakari") {
@@ -947,6 +1014,8 @@
     const p = game.player;
     const e = game.enemy;
     if (name === "red") {
+      p.dismantleUses++;
+      updateWorldSlashUnlock(p);
       p.attack = {
         name: "Dismantle", elapsed: 0, duration: .42, start: .12, end: .24,
         active: false, hit: new Set(), type: "dismantle", specialCancel: true,
@@ -964,6 +1033,8 @@
         tone(240, .12, "sawtooth", .24, -170);
       }, 120);
     } else if (name === "blue") {
+      p.cleaveUses++;
+      updateWorldSlashUnlock(p);
       const weakened = 1 - clamp(e.health / e.maxHealth, 0, 1);
       p.attack = {
         name: "Cleave", elapsed: 0, duration: .48, start: .16, end: .31,
@@ -987,7 +1058,7 @@
         const projectile = {
           owner: "player", type: "worldSlash", x: p.x + p.facing * 120, y: p.y - 84,
           vx: p.facing * 920, vy: 0, w: 285, h: 112, life: .9,
-          damage: p.awakening > 0 ? 48 : 39, kbX: 760, kbY: 240, strong: true, erasing: true,
+          damage: p.awakening > 0 ? 144 : 117, kbX: 760, kbY: 240, strong: true, erasing: true,
         };
         game.projectiles.push(projectile);
         sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
@@ -998,6 +1069,25 @@
     } else if (name === "domain") {
       activateDomain();
     }
+  }
+
+  function rollHakariRarity(p) {
+    const roll = Math.random() * 100;
+    const goldThreshold = 4 + p.heat * .05 + p.parryHot * .8;
+    const redThreshold = goldThreshold + 24 + p.heat * .04;
+    return roll < goldThreshold ? "gold" : roll < redThreshold ? "red" : "green";
+  }
+
+  function registerHakariRollInput(technique, rarity) {
+    const p = game.player;
+    const domain = game.hakariDomain;
+    if (!domain) return;
+    domain.rollInputs.push({ technique, rarity });
+    domain.lastRarity = rarity;
+    domain.result = "charging";
+    announce(`${rarity.toUpperCase()} ${technique.toUpperCase()}  ${domain.rollInputs.length}/2`);
+    if (domain.rollInputs.length >= 2) resolveHakariRoll();
+    p.heat = Math.min(100, p.heat + (rarity === "gold" ? 10 : rarity === "red" ? 6 : 3));
   }
 
   function useHakariTechnique(name) {
@@ -1017,12 +1107,25 @@
       p.state = "roughPunch";
       tone(125, .16, "square", .26, 160);
     } else if (name === "blue") {
-      const roll = Math.random() + p.heat / 350 + (game.hakariDomain?.bonus || 0) * .03;
-      const rarity = roll > .92 ? "gold" : roll > .66 ? "red" : "green";
-      const count = p.jackpot > 0 ? 3 : 1;
+      if (p.jackpot > 0) {
+        p.attack = {
+          name: "Gambler's Luck", elapsed: 0, duration: .95, start: .15, end: .72,
+          active: false, hit: new Set(), type: "gamblersLuck", specialCancel: false,
+          range: 112, h: 76, y: -76, damage: 28, kbX: 650, kbY: 120,
+          reaction: "slam", color: "#ffe95a", strong: true, rough: true, grab: true,
+        };
+        p.state = "gamblersLuck";
+        p.vx = p.facing * 285;
+        game.shake = 7;
+        announce("GAMBLER'S LUCK");
+        spawnParticles(p.x + p.facing * 40, GROUND - 8, "#58ff8c", 22, 360, 8, .75);
+        tone(115, .32, "square", .28, 310);
+        return;
+      }
+      const rarity = rollHakariRarity(p);
       p.attack = { name: `${rarity.toUpperCase()} Shutter Doors`, elapsed: 0, duration: .48, start: .14, end: .3, active: false, hit: new Set(), type: "doors" };
       p.state = "doors";
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < 1; i++) {
         const projectile = {
           owner: "player", type: "door", rarity,
           x: p.x + p.facing * (105 + i * 78), y: GROUND - 64,
@@ -1033,17 +1136,33 @@
         game.projectiles.push(projectile);
         sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
       }
-      if (game.hakariDomain) game.hakariDomain.bonus += rarity === "gold" ? 3 : rarity === "red" ? 1.2 : .5;
+      registerHakariRollInput("shutter", rarity);
       p.heat = Math.min(100, p.heat + (rarity === "gold" ? 12 : 5));
       announce(`${rarity.toUpperCase()} SHUTTER DOORS`);
       tone(rarity === "gold" ? 720 : rarity === "red" ? 430 : 260, .2, "square", .2, -120);
     } else if (name === "purple") {
-      const count = p.jackpot > 0 ? 5 : 1;
+      if (p.jackpot > 0) {
+        p.attack = {
+          name: "Fever Breaker", elapsed: 0, duration: .78, start: .12, end: .48,
+          active: false, hit: new Set(), type: "feverBreaker", specialCancel: false,
+          range: 98, h: 92, y: -92, damage: 26, kbX: 95, kbY: -820,
+          reaction: "slam", color: "#fff35d", strong: true, rough: true, downslam: true,
+        };
+        p.state = "feverBreaker";
+        p.vx = p.facing * 220;
+        game.cinematic = .18;
+        game.cameraTarget = 1.18;
+        announce("FEVER BREAKER");
+        spawnParticles(p.x + p.facing * 48, p.y - 62, "#fff35d", 24, 420, 8, .7);
+        tone(165, .28, "square", .3, 380);
+        return;
+      }
+      const rarity = rollHakariRarity(p);
       p.attack = { name: "Reserve Balls", elapsed: 0, duration: .34, start: .08, end: .2, active: false, hit: new Set(), type: "reserveBall" };
       p.state = "cast";
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < 1; i++) {
         const projectile = {
-          owner: "player", type: "reserveBall",
+          owner: "player", type: "reserveBall", rarity,
           x: p.x + p.facing * 44, y: p.y - 72 - i * 8,
           vx: p.facing * (520 + i * 45), vy: -140 + i * 55,
           w: 20, h: 20, life: 2.4, damage: 7.2, kbX: 130, kbY: 45,
@@ -1052,8 +1171,9 @@
         game.projectiles.push(projectile);
         sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
       }
-      if (game.hakariDomain) game.hakariDomain.bonus += p.jackpot > 0 ? 2 : .8;
+      registerHakariRollInput("reserve", rarity);
       p.heat = Math.min(100, p.heat + 4);
+      announce(`${rarity.toUpperCase()} RESERVE BALL`);
       tone(510, .12, "square", .16, 100);
     } else if (name === "domain") {
       activateDomain();
@@ -1200,6 +1320,10 @@
   function activateDomain() {
     const p = game.player;
     const profile = characterProfile(p);
+    if (p.character === "sukuna") {
+      p.sukunaDomainUses++;
+      updateWorldSlashUnlock(p);
+    }
     p.cooldowns.domain = profile.cooldowns.domain;
     p.attack = null;
     p.state = "domain";
@@ -1228,6 +1352,10 @@
     speakLine(p.character === "sukuna" ? "Open your eyes." : p.character === "hakari" ? "Let's gamble." : "Domain Expansion. Unlimited Void.");
     setTimeout(() => {
       if (game.state !== "playing") return;
+      if (game.online.active && game.online.authoritative) {
+        p.state = "idle";
+        return;
+      }
       if (game.online.active && game.domainClashPending) {
         game.domainClashPending = false;
         return;
@@ -1239,7 +1367,8 @@
       } else if (p.character === "hakari") {
         startHakariDomain();
       } else {
-        game.domain = 9;
+        game.domain = p.character === "sukuna" ? 15 : 12;
+        game.domainTick = .5;
         p.state = "idle";
         spawnParticles(W / 2, H / 2, p.character === "sukuna" ? "#ff254c" : "#9f8cff", 80, 520, 7, 1.2);
         announce(p.character === "sukuna" ? "MALEVOLENT SHRINE" : "UNLIMITED VOID");
@@ -1253,14 +1382,14 @@
     game.domainCharacter = "hakari";
     game.hakariDomain = {
       timer: 14,
-      rollTimer: .9,
       rollIndex: 0,
       slots: [1, 3, 7],
       displaySlots: [1, 3, 7],
-      bonus: p.parryHot + p.heat / 35,
+      rollInputs: [],
+      lastRarity: "",
       nearBonus: 0,
       damageTaken: 0,
-      result: "rolling",
+      result: "waiting",
       flash: 0,
     };
     p.parryHot = 0;
@@ -1273,9 +1402,11 @@
   function resolveHakariRoll(forced = "") {
     const p = game.player;
     const domain = game.hakariDomain;
-    if (!domain) return;
-    const jackpotChance = clamp(.08 + p.heat * .0028 + domain.bonus * .025 + domain.nearBonus, .08, .72);
-    const nearChance = clamp(.38 + p.heat * .0018 + domain.nearBonus, .35, .78);
+    if (!domain || domain.rollInputs.length < 2) return;
+    const rarityValue = { green: 0, red: 1, gold: 2 };
+    const rarityScore = clamp(domain.rollInputs.reduce((total, input) => total + rarityValue[input.rarity], 0), 0, 4);
+    const jackpotChance = clamp([.02, .04, .07, .11, .17][rarityScore] + p.heat * .0003 + domain.nearBonus, .02, .22);
+    const nearChance = clamp(jackpotChance + .28, .3, .5);
     const roll = Math.random();
     const result = forced || (roll < jackpotChance ? "jackpot" : roll < nearChance ? "near" : "fail");
     const number = 1 + Math.floor(Math.random() * 7);
@@ -1289,8 +1420,7 @@
       domain.slots = [number, number, miss];
       domain.displaySlots = [...domain.slots];
       domain.result = "near";
-      domain.nearBonus = Math.min(.28, domain.nearBonus + .12);
-      domain.bonus += 1.2;
+      domain.nearBonus = Math.min(.06, domain.nearBonus + .02);
       p.awakening = Math.max(p.awakening, 3.5);
       p.heat = Math.min(100, p.heat + 12);
       announce("REACH! NEAR JACKPOT");
@@ -1299,14 +1429,14 @@
       domain.slots = [1 + Math.floor(Math.random() * 7), 1 + Math.floor(Math.random() * 7), 1 + Math.floor(Math.random() * 7)];
       domain.displaySlots = [...domain.slots];
       domain.result = "fail";
-      p.energy = Math.min(100, p.energy + 16);
+      p.energy = Math.min(100, p.energy + 10);
       p.stun = Math.max(p.stun, .28);
       announce("ROLL MISSED");
       tone(90, .25, "square", .18, -40);
     }
     domain.flash = .7;
     domain.rollIndex++;
-    domain.rollTimer = result === "near" ? 1.6 : 2.4;
+    domain.rollInputs = [];
   }
 
   function startJackpot(fromClash = false) {
@@ -1375,10 +1505,7 @@
     const domain = game.hakariDomain;
     if (!domain) return;
     domain.timer -= dt;
-    domain.rollTimer -= dt;
     domain.flash = Math.max(0, domain.flash - dt);
-    domain.displaySlots = domain.displaySlots.map(() => 1 + Math.floor(Math.random() * 7));
-    if (domain.rollTimer <= 0) resolveHakariRoll();
     if (domain.timer <= 0) shatterHakariDomain();
   }
 
@@ -1702,6 +1829,14 @@
   function updatePlayer(dt) {
     const p = game.player;
     const e = game.enemy;
+    if (game.online.active && game.online.authoritative) {
+      p.x += game.online.correctionX * .24;
+      p.y += game.online.correctionY * .24;
+      game.online.correctionX *= .76;
+      game.online.correctionY *= .76;
+      if (Math.abs(game.online.correctionX) < .05) game.online.correctionX = 0;
+      if (Math.abs(game.online.correctionY) < .05) game.online.correctionY = 0;
+    }
     updateHakariState(dt);
     p.stateTime += dt;
     p.stun = Math.max(0, p.stun - dt);
@@ -1852,8 +1987,32 @@
       updateRemotePlayer(dt);
       return;
     }
-    const domainSlow = game.domain > 0 && game.domainCharacter === "gojo" ? .27 : 1;
-    dt *= domainSlow;
+    if (game.domain > 0 && game.domainCharacter === "sukuna") {
+      game.domainTick -= dt;
+      if (game.domainTick <= 0) {
+        game.domainTick += .5;
+        e.health = Math.max(0, e.health - 15);
+        e.stun = Math.max(e.stun, .1);
+        e.reaction = "slash";
+        p.damageDealt += 15;
+        game.shake = Math.max(game.shake, 8);
+        for (let i = 0; i < 7; i++) {
+          game.particles.push({
+            x: e.x + rnd(-35, 35), y: e.y - rnd(18, e.h),
+            vx: rnd(-360, 360), vy: rnd(-280, 180), size: rnd(8, 18),
+            color: i % 2 ? "#ff244f" : "#fff1f3",
+            life: .24, maxLife: .24, gravity: 0, slash: true,
+          });
+        }
+      }
+    }
+    if (game.domain > 0 && game.domainCharacter === "gojo") {
+      e.vx = 0;
+      e.vy = 0;
+      e.attack = null;
+      e.state = "voidFrozen";
+      return;
+    }
     e.stateTime += dt;
     e.stun = Math.max(0, e.stun - dt);
     e.invuln = Math.max(0, e.invuln - dt);
@@ -1942,13 +2101,35 @@
 
   function updateRemotePlayer(dt) {
     const e = game.enemy;
-    const target = game.online.remoteTarget;
+    let target = game.online.remoteTarget;
     e.stateTime += dt;
     e.flash = Math.max(0, e.flash - dt);
     e.lagHealth = lerp(e.lagHealth, e.health, clamp(dt * 2, 0, 1));
+    if (game.online.authoritative && game.online.snapshotBuffer.length) {
+      const renderTick = game.online.serverFrame - game.online.interpolationTicks;
+      const snapshots = game.online.snapshotBuffer;
+      let before = snapshots[0];
+      let after = snapshots[snapshots.length - 1];
+      for (let i = 0; i < snapshots.length - 1; i++) {
+        if (snapshots[i].snapshotTick <= renderTick && snapshots[i + 1].snapshotTick >= renderTick) {
+          before = snapshots[i];
+          after = snapshots[i + 1];
+          break;
+        }
+      }
+      const span = Math.max(1, after.snapshotTick - before.snapshotTick);
+      const ratio = clamp((renderTick - before.snapshotTick) / span, 0, 1);
+      target = {
+        ...after,
+        x: lerp(before.x, after.x, ratio),
+        y: lerp(before.y, after.y, ratio),
+        vx: lerp(before.vx, after.vx, ratio),
+        vy: lerp(before.vy, after.vy, ratio),
+      };
+    }
     if (!target) return;
     const distance = Math.hypot(target.x - e.x, target.y - e.y);
-    const blend = distance > 180 ? 1 : clamp(dt * 13, 0, 1);
+    const blend = distance > 220 ? 1 : clamp(dt * (game.online.interpolationTicks > 6 ? 8 : 14), 0, 1);
     e.x = lerp(e.x, target.x, blend);
     e.y = lerp(e.y, target.y, blend);
     e.vx = target.vx;
@@ -2369,6 +2550,10 @@
     game.purpleExplosion = Math.max(0, game.purpleExplosion - dt);
     game.realityCrack = Math.max(0, game.realityCrack - dt);
     game.jackpotFlash = Math.max(0, game.jackpotFlash - dt);
+    if (game.remoteUnstablePurple) {
+      game.remoteUnstablePurple.timer -= dt;
+      if (game.remoteUnstablePurple.timer <= 0) game.remoteUnstablePurple = null;
+    }
     game.online.localDomainWindow = Math.max(0, game.online.localDomainWindow - dt);
     game.online.remoteDomainWindow = Math.max(0, game.online.remoteDomainWindow - dt);
     game.domain = Math.max(0, game.domain - dt);
@@ -2391,6 +2576,7 @@
     e.lagHealth = lerp(e.lagHealth, e.health, clamp(dt * 2, 0, 1));
 
     if (game.online.active) {
+      if (game.online.authoritative) return;
       const roundOver = p.health <= 0 || e.health <= 0 || game.time <= 0;
       if (roundOver && !game.online.resultReported) {
         game.online.resultReported = true;
@@ -2646,19 +2832,24 @@
     ui.combatPrompt.classList.toggle("visible", !!prompt);
     ui.combatPrompt.classList.toggle("black-flash", blackFlashPrompt);
 
-    for (const [name, cost] of Object.entries(profile.costs)) {
+    for (const [name] of Object.entries(profile.costs)) {
       const el = document.querySelector(`[data-ability="${name}"]`);
+      const tuning = abilityTuning(p, name);
+      const cost = tuning.cost;
       const cd = p.cooldowns[name];
-      const ratio = cd > 0 ? 1 - cd / profile.cooldowns[name] : 1;
+      const ratio = cd > 0 ? 1 - cd / tuning.cooldown : 1;
       el.querySelector("i").style.transform = `scaleX(${ratio})`;
-      el.querySelector("span").textContent = profile.labels[name];
+      el.querySelector("span").textContent = tuning.label;
       const burntOutLock = p.character === "gojo" && p.burnout > 0 && (name === "blue" || name === "red" || name === "domain");
       const purpleReady = p.character !== "gojo" || name !== "purple" || (game.unstablePurple?.state === "unstable");
-      el.classList.toggle("locked", p.energy < cost || cd > 0 || burntOutLock || !purpleReady);
+      const worldSlashReady = p.character !== "sukuna" || name !== "purple" || p.worldSlashUnlocked;
+      el.classList.toggle("locked", p.energy < cost || cd > 0 || burntOutLock || !purpleReady || !worldSlashReady);
       const hint = el.querySelector("b");
       if (hint && name === "purple") {
-        hint.textContent = p.character !== "gojo"
-          ? `${cost} CE`
+        hint.textContent = p.character === "sukuna" && !p.worldSlashUnlocked
+          ? `${p.dismantleUses}/10 D  ${p.cleaveUses}/5 C  ${p.sukunaDomainUses}/1 T`
+          : p.character !== "gojo"
+            ? `${cost} CE`
           : game.unstablePurple?.state === "unstable" ? "READY" : game.unstablePurple?.state === "firing" ? "FIRING" : "FUSE B+R";
       }
     }
@@ -2679,12 +2870,12 @@
       ui.heatMeter.style.transform = `scaleX(${clamp(p.heat / 100, 0, 1)})`;
       ui.heatValue.textContent = p.jackpot > 0 ? `${p.jackpot.toFixed(1)}s` : `${Math.round(p.heat)}%`;
       ui.heatHint.textContent = p.jackpot > 0
-        ? "UNLIMITED CURSED ENERGY / AUTO HEAL"
+        ? "R: GAMBLER'S LUCK / Q: FEVER BREAKER"
         : game.hakariDomain
-          ? `${game.hakariDomain.displaySlots.join(" - ")} / ROLL ${game.hakariDomain.rollIndex + 1}`
+          ? `${game.hakariDomain.displaySlots.join(" - ")} / SETUP ${game.hakariDomain.rollInputs.length}/2${game.hakariDomain.lastRarity ? ` / ${game.hakariDomain.lastRarity.toUpperCase()}` : ""}`
           : p.rewindWindow > 0
             ? "CONSECUTIVE EFFECT ARMED"
-            : `DOMAIN ODDS ${Math.round(clamp(8 + p.heat * .28 + p.parryHot * 2.5, 8, 72))}%`;
+            : "DOMAIN ROLL REQUIRES 2 SHUTTERS / RESERVES";
     } else {
       ui.heatStatus.classList.add("hidden");
       ui.heatStatus.classList.remove("jackpot");
@@ -3306,13 +3497,14 @@
         for (let y = -52; y < 60; y += 15) pixelRect(-17, y, 34, 5, "#17251c");
         pixelRect(-4, -61, 8, 122, "#d9ffe4");
       } else if (o.type === "reserveBall") {
-        ctx.fillStyle = "#52f48755";
+        const color = o.rarity === "gold" ? "#ffe95a" : o.rarity === "red" ? "#ff4264" : "#52f487";
+        ctx.fillStyle = `${color}55`;
         ctx.beginPath();
         ctx.arc(0, 0, 17, 0, Math.PI * 2);
         ctx.fill();
-        pixelRect(-9, -9, 18, 18, "#37c96a");
-        pixelRect(-4, -4, 8, 8, "#e5ff72");
-        pixelRect(-Math.sign(o.vx) * 24, -3, 18, 6, "#55f087");
+        pixelRect(-9, -9, 18, 18, color);
+        pixelRect(-4, -4, 8, 8, "#f6ffe3");
+        pixelRect(-Math.sign(o.vx) * 24, -3, 18, 6, color);
       } else {
         ctx.rotate(Math.atan2(o.vy, o.vx));
         pixelRect(-o.w / 2, -o.h / 2, o.w, o.h, "#6c183b");
@@ -3381,6 +3573,41 @@
     ctx.strokeRect(-58, -radius - 30, 116, 10);
     ctx.fillStyle = purple.state === "firing" ? "#f1dcff" : "#9b5cff";
     ctx.fillRect(-56, -radius - 28, 112 * progress, 6);
+    ctx.restore();
+  }
+
+  function drawRemoteUnstablePurple() {
+    const purple = game.remoteUnstablePurple;
+    if (!purple) return;
+    const t = performance.now() * .001;
+    const radius = 40 + Math.sin(t * 18) * 5;
+    ctx.save();
+    ctx.translate(purple.x + rnd(-5, 5), purple.y + rnd(-5, 5));
+    ctx.globalCompositeOperation = "lighter";
+    const aura = ctx.createRadialGradient(0, 0, 4, 0, 0, radius * 2.1);
+    aura.addColorStop(0, "#f7edff");
+    aura.addColorStop(.25, "#b66cff");
+    aura.addColorStop(.62, "#5b27b8aa");
+    aura.addColorStop(1, "#17062900");
+    ctx.fillStyle = aura;
+    ctx.fillRect(-radius * 2.2, -radius * 2.2, radius * 4.4, radius * 4.4);
+    ctx.fillStyle = "#8d4fff";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#13021c";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * .5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#4c8cff";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius * 1.35, radius * .55, t * 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = "#ff315d";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius * 1.35, radius * .55, -t * 4.4, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -3588,6 +3815,7 @@
       for (const a of game.afterimages) drawFighter(a, a.life / a.maxLife * .45, a.color);
       drawProjectiles();
       drawUnstablePurple();
+      drawRemoteUnstablePurple();
       if (game.player) drawFighter(game.player);
       if (game.enemy) {
         if (game.online.active && game.enemy.kind === "remote") drawFighter(game.enemy);
@@ -3679,7 +3907,16 @@
   function frame(now) {
     const dt = Math.min(.033, (now - lastTime) / 1000);
     lastTime = now;
-    update(dt);
+    if (game.online.active && game.state === "playing") {
+      onlineAccumulator = Math.min(.12, onlineAccumulator + dt);
+      while (onlineAccumulator >= 1 / 60) {
+        update(1 / 60);
+        onlineAccumulator -= 1 / 60;
+      }
+    } else {
+      onlineAccumulator = 0;
+      update(dt);
+    }
     draw();
     pressed.clear();
     requestAnimationFrame(frame);
@@ -3698,6 +3935,287 @@
       ui.pause.classList.add("hidden");
       lastTime = performance.now();
     }
+  }
+
+  function captureOnlineInput(frame) {
+    if (!game.online.active || !game.player || game.state !== "playing") return null;
+    const edges = game.online.inputEdges;
+    const input = {
+      move: (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0),
+      jump: edges.jump,
+      dash: edges.dash,
+      block: keys.has("s"),
+      charge: keys.has("c"),
+      light: edges.light,
+      heavy: edges.heavy,
+      special: edges.special,
+      domain: edges.domain,
+      awaken: edges.awaken,
+    };
+    game.online.inputEdges = {
+      jump: false, dash: false, light: false, heavy: false,
+      special: "", domain: false, awaken: false,
+    };
+    game.online.predictionHistory.set(frame, {
+      x: game.player.x,
+      y: game.player.y,
+      vx: game.player.vx,
+      vy: game.player.vy,
+    });
+    for (const savedFrame of game.online.predictionHistory.keys()) {
+      if (savedFrame < frame - 180) game.online.predictionHistory.delete(savedFrame);
+    }
+    return input;
+  }
+
+  function authoritativeAttack(serverPlayer, snapshotTick) {
+    const attack = serverPlayer.attack;
+    if (!attack) return null;
+    const names = {
+      light: "M1 COMBO",
+      heavy: "HEAVY ATTACK",
+      roughPunch: "ROUGH CURSED PUNCH",
+      cleave: "CLEAVE",
+      door: "SHUTTER DOORS",
+      gamblersLuck: "GAMBLER'S LUCK",
+      feverBreaker: "FEVER BREAKER",
+    };
+    const duration = Math.max(.1, (attack.endTick - attack.startTick) / 60);
+    return {
+      name: names[attack.kind] || attack.kind.toUpperCase(),
+      type: attack.kind,
+      elapsed: clamp((snapshotTick - attack.startTick) / 60, 0, duration),
+      duration,
+      start: .1,
+      end: Math.min(duration, .24),
+      active: snapshotTick >= attack.startTick + 6,
+      chain: attack.kind === "light",
+      chainStep: attack.step || 0,
+      hit: new Set(),
+      strong: attack.kind !== "light" || attack.step === 4,
+    };
+  }
+
+  function displayAuthoritativeEvent(event) {
+    if (!event || event.tick < game.online.lastEventTick) return;
+    game.online.lastEventTick = Math.max(game.online.lastEventTick, event.tick);
+    if (event.kind === "parry") {
+      announce(event.slot === game.online.slot ? "PERFECT PARRY" : "ATTACK PARRIED");
+      game.slow = .35;
+      game.shake = 9;
+    } else if (event.kind === "reflect") {
+      announce(event.slot === game.online.slot ? "PROJECTILE REFLECT" : "PROJECTILE REFLECTED");
+      game.slow = .25;
+      game.shake = 8;
+    } else if (event.kind === "purpleFusion") {
+      announce("UNSTABLE HOLLOW PURPLE");
+      game.glitch = .18;
+      game.shake = 7;
+      if (event.slot !== game.online.slot) {
+        game.remoteUnstablePurple = {
+          x: Number(event.x || game.enemy.x),
+          y: Number(event.y || game.enemy.y - 72),
+          timer: Number(event.durationTicks || 228) / 60,
+          maxTimer: Number(event.durationTicks || 228) / 60,
+        };
+      }
+    } else if (event.kind === "purpleCollapse") {
+      announce("PURPLE COLLAPSE");
+      game.purpleExplosion = .85;
+      game.glitch = .65;
+      game.shake = 24;
+      game.remoteUnstablePurple = null;
+    } else if (event.kind === "domainStart") {
+      game.domainCharacter = event.character || "gojo";
+      game.domainIntro = 2.35;
+      game.cinematic = 2.35;
+      game.glitch = 1.15;
+      game.windPaused = true;
+      game.cameraTarget = 1.22;
+      announce(event.character === "sukuna" ? "MALEVOLENT SHRINE"
+        : event.character === "hakari" ? "IDLE DEATH GAMBLE" : "UNLIMITED VOID");
+    } else if (event.kind === "domainSlash") {
+      const victim = event.slot === game.online.slot ? game.player : game.enemy;
+      game.shake = Math.max(game.shake, 8);
+      for (let i = 0; i < 8; i++) {
+        game.particles.push({
+          x: victim.x + rnd(-34, 34), y: victim.y - rnd(18, victim.h),
+          vx: rnd(-380, 380), vy: rnd(-300, 180), size: rnd(8, 19),
+          color: i % 2 ? "#ff244f" : "#fff1f3",
+          life: .25, maxLife: .25, gravity: 0, slash: true,
+        });
+      }
+    } else if (event.kind === "specialCast") {
+      const remoteCast = event.slot !== game.online.slot;
+      if (remoteCast && event.technique === "purple") {
+        game.remoteUnstablePurple = null;
+        game.realityCrack = .75;
+        game.cinematic = .42;
+        game.shake = 19;
+        announce("HOLLOW PURPLE");
+      } else if (remoteCast && event.technique === "worldSlash") {
+        game.realityCrack = .55;
+        game.shake = 16;
+        announce("WORLD-CUTTING DISMANTLE");
+      } else if (remoteCast && event.technique === "gamblersLuck") {
+        announce("GAMBLER'S LUCK");
+      } else if (remoteCast && event.technique === "feverBreaker") {
+        announce("FEVER BREAKER");
+      }
+    } else if (event.kind === "hakariRollInput") {
+      const rarity = String(event.rarity || "green").toUpperCase();
+      announce(`${rarity} ${String(event.technique || "ROLL").toUpperCase()}  ${event.count}/2`);
+    } else if (event.kind === "worldSlashUnlocked") {
+      announce(event.slot === game.online.slot ? "WORLD-CUTTING SLASH UNLOCKED" : "OPPONENT UNLOCKED WORLD SLASH");
+      game.realityCrack = .3;
+    } else if (event.kind === "feverBreakerLaunch" || event.kind === "feverBreakerKick") {
+      const victim = event.slot === game.online.slot ? game.player : game.enemy;
+      spawnParticles(victim.x, victim.y - 55, "#fff35d", 26, 480, 8, .7);
+      game.shake = 12;
+    } else if (event.kind === "gamblersLuckGrind" || event.kind === "gamblersLuckThrow") {
+      const victim = event.slot === game.online.slot ? game.player : game.enemy;
+      spawnParticles(victim.x, GROUND - 7, "#58ff8c", 30, 430, 9, .75);
+      game.shake = 11;
+    } else if (event.kind === "jackpot") {
+      announce(event.slot === game.online.slot ? "JACKPOT" : "OPPONENT HIT JACKPOT");
+      if (game.hakariDomain && Array.isArray(event.slots)) game.hakariDomain.displaySlots = event.slots;
+      game.hakariDomain = null;
+      game.jackpotFlash = 1.2;
+      game.flash = .3;
+      game.shake = 16;
+    } else if (event.kind === "nearJackpot") {
+      if (game.hakariDomain && Array.isArray(event.slots)) game.hakariDomain.displaySlots = event.slots;
+      announce(event.slot === game.online.slot ? "REACH! NEAR JACKPOT" : "OPPONENT NEAR JACKPOT");
+    } else if (event.kind === "failedRoll") {
+      if (game.hakariDomain && Array.isArray(event.slots)) game.hakariDomain.displaySlots = event.slots;
+      announce(event.slot === game.online.slot ? "ROLL MISSED" : "OPPONENT MISSED ROLL");
+    } else if (event.kind === "clashResult") {
+      announce(event.winnerSlot === game.online.slot ? "CLASH WON" : "CLASH LOST");
+      game.flash = .18;
+      game.shake = 16;
+    } else if (event.kind === "hit" && event.slot === game.online.slot) {
+      game.shake = Math.max(game.shake, 5);
+    }
+  }
+
+  function applyAuthoritativeSnapshot(snapshot) {
+    if (!snapshot || !game.online.active || !game.player || !game.enemy) return;
+    const local = snapshot.players?.[game.online.slot];
+    const remoteSlot = game.online.slot === 1 ? 2 : 1;
+    const remote = snapshot.players?.[remoteSlot];
+    if (!local || !remote) return;
+    game.online.serverFrame = snapshot.tick;
+    game.time = Number(snapshot.remainingTicks || 0) / 60;
+
+    const predicted = game.online.predictionHistory.get(local.ackFrame);
+    const predictedX = predicted?.x ?? game.player.x;
+    const predictedY = predicted?.y ?? game.player.y;
+    const errorX = local.x - predictedX;
+    const errorY = local.y - predictedY;
+    if (Math.abs(errorX) > 140 || Math.abs(errorY) > 100) {
+      game.player.x = local.x;
+      game.player.y = local.y;
+      game.online.correctionX = 0;
+      game.online.correctionY = 0;
+    } else {
+      game.online.correctionX += errorX;
+      game.online.correctionY += errorY;
+    }
+    game.player.health = local.health;
+    game.player.maxHealth = local.maxHealth || 600;
+    game.player.energy = local.energy;
+    game.player.lagHealth = Math.min(game.player.lagHealth, game.player.maxHealth);
+    game.player.stun = Math.max(game.player.stun, Number(local.stun || 0) / 60);
+    game.player.invuln = Math.max(game.player.invuln, Number(local.invuln || 0) / 60);
+    game.player.awakening = Number(local.awakeningTicks || 0) / 60;
+    game.player.jackpot = Number(local.jackpotTicks || 0) / 60;
+    game.player.dismantleUses = Number(local.dismantleUses || 0);
+    game.player.cleaveUses = Number(local.cleaveUses || 0);
+    game.player.sukunaDomainUses = Number(local.sukunaDomainUses || 0);
+    game.player.worldSlashUnlocked = Boolean(local.worldSlashUnlocked);
+    game.player.charging = Boolean(local.charging);
+    for (const [name, ticks] of Object.entries(local.cooldowns || {})) {
+      if (name in game.player.cooldowns) game.player.cooldowns[name] = Number(ticks) / 60;
+    }
+    for (const frame of game.online.predictionHistory.keys()) {
+      if (frame <= local.ackFrame) game.online.predictionHistory.delete(frame);
+    }
+
+    const remoteTarget = {
+      ...remote,
+      health: remote.health,
+      maxHealth: remote.maxHealth || 600,
+      awakening: Number(remote.awakeningTicks || 0) / 60,
+      jackpot: Number(remote.jackpotTicks || 0) / 60,
+      dismantleUses: Number(remote.dismantleUses || 0),
+      cleaveUses: Number(remote.cleaveUses || 0),
+      sukunaDomainUses: Number(remote.sukunaDomainUses || 0),
+      worldSlashUnlocked: Boolean(remote.worldSlashUnlocked),
+      burnout: 0,
+      state: remote.attack ? "attack" : remote.charging ? "charge" : Math.abs(remote.vx) > 10 ? "run" : "idle",
+      attack: authoritativeAttack(remote, snapshot.tick),
+      snapshotTick: snapshot.tick,
+    };
+    game.online.snapshotBuffer.push(remoteTarget);
+    game.online.snapshotBuffer = game.online.snapshotBuffer.slice(-24);
+
+    const domainOwner = Number(local.domainTicks || 0) >= Number(remote.domainTicks || 0) ? local : remote;
+    game.domain = Math.max(Number(local.domainTicks || 0), Number(remote.domainTicks || 0)) / 60;
+    if (game.domain > 0) {
+      game.domainCharacter = domainOwner.character;
+      game.windPaused = true;
+      if (domainOwner.character === "hakari") {
+        if (!game.hakariDomain) {
+          game.hakariDomain = {
+            timer: game.domain, rollIndex: 0, slots: [1, 3, 7], displaySlots: [1, 3, 7],
+            rollInputs: [], lastRarity: "", nearBonus: 0, damageTaken: 0, result: "waiting", flash: 0,
+          };
+        }
+        game.hakariDomain.timer = game.domain;
+        game.hakariDomain.rollInputs = Array.isArray(domainOwner.hakariRollInputs) ? domainOwner.hakariRollInputs : [];
+        game.hakariDomain.lastRarity = domainOwner.hakariLastRarity || "";
+        game.hakariDomain.nearBonus = Number(domainOwner.hakariNearBonus || 0) / 100;
+      } else {
+        game.hakariDomain = null;
+      }
+    } else {
+      game.hakariDomain = null;
+    }
+
+    game.projectiles = game.projectiles.filter((projectile) => !projectile.serverOwned);
+    for (const projectile of snapshot.projectiles || []) {
+      if (projectile.owner === game.online.slot) continue;
+      game.projectiles.push({
+        ...projectile,
+        owner: "enemy",
+        type: projectile.kind,
+        w: projectile.radius * 2,
+        h: projectile.radius * 2,
+        visualOnly: true,
+        serverOwned: true,
+      });
+    }
+
+    if (snapshot.clash && !game.clash) beginClash(snapshot.clash.type === "domain" ? "DOMAIN COLLISION" : "CURSED TECHNIQUE COLLISION", snapshot.clash.type === "domain", "power", true);
+    if (snapshot.clash && game.clash) {
+      game.clash.power = game.online.slot === 1 ? snapshot.clash.power : 100 - snapshot.clash.power;
+      game.clash.timer = snapshot.clash.ticks / 60;
+    } else if (!snapshot.clash && game.clash) {
+      game.clash = null;
+      ui.clash.classList.add("hidden");
+    }
+    for (const event of snapshot.events || []) displayAuthoritativeEvent(event);
+  }
+
+  function updateNetworkStatus(status = {}) {
+    if (!ui.networkWarning) return;
+    const reconnecting = Boolean(status.reconnecting);
+    const bad = Boolean(status.bad);
+    game.online.interpolationTicks = bad || reconnecting ? 10 : 6;
+    ui.networkWarning.classList.toggle("hidden", !bad && !reconnecting);
+    ui.networkWarning.textContent = reconnecting
+      ? `! RECONNECTING ${Math.max(0, Number(status.seconds || 0)).toFixed(1)}s`
+      : `! HIGH LATENCY ${Math.round(Number(status.ping || 0))}ms`;
   }
 
   function onlineSnapshot() {
@@ -3935,7 +4453,8 @@
     if (["a", "d", "w", "s", "c", "q", "e", "r", "t", "f", "shift", "escape", "enter", " "].includes(key)) {
       event.preventDefault();
     }
-    if (!keys.has(key)) pressed.add(key);
+    const firstPress = !keys.has(key);
+    if (firstPress) pressed.add(key);
     keys.add(key);
     if (game.clash) {
       clashInput(key);
@@ -3944,13 +4463,34 @@
     if (game.state === "menu" && key === "enter" && !ui.menu.classList.contains("hidden")) startOfflineSelection();
     if (key === "escape" && (game.state === "playing" || game.state === "paused")) pauseGame();
     if (game.state !== "playing") return;
-    if (key === "w") jump();
-    if (key === "shift") shortDash();
-    if (key === "e") useAbility("red");
-    if (key === "r") useAbility("blue");
-    if (key === "q") useAbility("purple");
-    if (key === "t") useAbility("domain");
-    if (key === "f") awaken();
+    if (key === "w") {
+      if (firstPress) queueOnlineEdge("jump");
+      jump();
+    }
+    if (key === "shift") {
+      if (firstPress) queueOnlineEdge("dash");
+      shortDash();
+    }
+    if (key === "e") {
+      if (firstPress) queueOnlineEdge("special", "red");
+      useAbility("red");
+    }
+    if (key === "r") {
+      if (firstPress) queueOnlineEdge("special", "blue");
+      useAbility("blue");
+    }
+    if (key === "q") {
+      if (firstPress) queueOnlineEdge("special", "purple");
+      useAbility("purple");
+    }
+    if (key === "t") {
+      if (firstPress) queueOnlineEdge("domain");
+      useAbility("domain");
+    }
+    if (key === "f") {
+      if (firstPress) queueOnlineEdge("awaken");
+      awaken();
+    }
     if (key === "s" && game.player) game.player.guardStart = performance.now();
   });
 
@@ -3962,8 +4502,14 @@
   canvas.addEventListener("mousedown", (event) => {
     if (game.state !== "playing" || game.clash) return;
     event.preventDefault();
-    if (event.button === 0) playerAttack("light");
-    if (event.button === 2) playerAttack("heavy");
+    if (event.button === 0) {
+      queueOnlineEdge("light");
+      playerAttack("light");
+    }
+    if (event.button === 2) {
+      queueOnlineEdge("heavy");
+      playerAttack("heavy");
+    }
   });
 
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -4059,6 +4605,9 @@
     },
     versus: configureVersus,
     snapshot: onlineSnapshot,
+    input: captureOnlineInput,
+    authoritative: applyAuthoritativeSnapshot,
+    network: updateNetworkStatus,
     receive: receiveOnline,
     finish: finishOnlineMatch,
     stats: getOnlineStats,
