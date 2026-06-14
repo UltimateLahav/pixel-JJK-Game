@@ -968,6 +968,19 @@ canvas {
   box-shadow: 0 0 20px #ff204966;
   text-shadow: 2px 2px #9d092a;
 }
+.network-warning {
+  position: absolute;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  color: #190b00;
+  border: 1px solid #fff0ae;
+  background: #ffbd55e8;
+  box-shadow: 0 0 18px #ff7b2f66;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
 
 .announcement {
   position: absolute;
