@@ -20,8 +20,8 @@ const CHARACTER = {
     light: [6, 7, 8, 9, 13],
     heavy: 14,
     specials: {
-      red: { cost: 16, cooldown: 372, kind: "red", damage: 18 },
-      blue: { cost: 20, cooldown: 270, kind: "blue", damage: 2.3 },
+      red: { cost: 26, cooldown: 372, kind: "red", damage: 18 },
+      blue: { cost: 18, cooldown: 270, kind: "blue", damage: 2.3 },
       purple: { cost: 82, cooldown: 780, kind: "purple", damage: 88, requiresPurple: true },
     },
   },
@@ -30,8 +30,8 @@ const CHARACTER = {
     light: [6.5, 7.5, 8.5, 9.5, 14],
     heavy: 16.5,
     specials: {
-      red: { cost: 12, cooldown: 204, kind: "dismantle", damage: 15 },
-      blue: { cost: 18, cooldown: 312, kind: "cleave", damage: 18 },
+      red: { cost: 16, cooldown: 204, kind: "dismantle", damage: 15 },
+      blue: { cost: 22, cooldown: 312, kind: "cleave", damage: 18 },
       purple: { cost: 95, cooldown: 900, kind: "worldSlash", damage: 117 },
     },
   },
@@ -400,19 +400,16 @@ class AuthoritativeMatch {
       kind: "specialCast", slot: player.slot, technique: move.kind,
       x: player.x, y: player.y - 72, facing: player.facing, tick: this.tick,
     });
-    if (move.kind === "roughPunch" || move.kind === "cleave" || move.kind === "door"
+    if (move.kind === "roughPunch" || move.kind === "cleave"
       || move.kind === "gamblersLuck" || move.kind === "feverBreaker") {
       player.attack = {
         kind: move.kind, startTick: this.tick, activeTick: this.tick + 8,
         endActiveTick: this.tick + (move.kind === "gamblersLuck" ? 22 : 14),
         endTick: this.tick + (move.kind === "gamblersLuck" ? 48 : move.kind === "feverBreaker" ? 38 : 25),
         damage: move.damage,
-        range: move.kind === "door" ? 170 : move.kind === "gamblersLuck" ? 132 : 105,
+        range: move.kind === "gamblersLuck" ? 132 : 105,
         strong: true, hit: false,
       };
-      if (player.character === "hakari" && player.domainTicks > 0 && move.kind === "door") {
-        player.attack.rarity = this.registerHakariRoll(player, "shutter");
-      }
       return;
     }
     const direction = player.facing;
@@ -435,10 +432,21 @@ class AuthoritativeMatch {
       projectile.vy = -140;
       projectile.radius = 12;
     }
+    if (move.kind === "door") {
+      projectile.vx = 0;
+      projectile.y = GROUND - 64;
+      projectile.life = 50;
+      projectile.radius = 28;
+      projectile.rarity = player.domainTicks > 0
+        ? this.registerHakariRoll(player, "shutter")
+        : this.hakariRarity(player, "shutter");
+    }
     if (move.kind === "dismantle") projectile.vx = direction * 760;
     if (move.kind === "worldSlash") projectile.radius = 90;
     if (player.character === "hakari" && player.domainTicks > 0 && move.kind === "reserveBall") {
       projectile.rarity = this.registerHakariRoll(player, "reserve");
+    } else if (player.character === "hakari" && move.kind === "reserveBall") {
+      projectile.rarity = this.hakariRarity(player, "reserve");
     }
     this.projectiles.push(projectile);
     if (move.kind === "purple") player.unstablePurpleTicks = 0;
@@ -484,10 +492,14 @@ class AuthoritativeMatch {
     return ((this.seed ^ ((this.tick + salt) * 1103515245) ^ (player.slot * 12345)) >>> 0) % 100;
   }
 
-  registerHakariRoll(player, technique) {
+  hakariRarity(player, technique) {
     const value = this.deterministicPercent(player, player.hakariRollInputs.length * 97 + (technique === "reserve" ? 31 : 67));
     const parryBoost = Math.min(6, player.parries);
-    const rarity = value < 6 + parryBoost ? "gold" : value < 32 + parryBoost ? "red" : "green";
+    return value < 6 + parryBoost ? "gold" : value < 32 + parryBoost ? "red" : "green";
+  }
+
+  registerHakariRoll(player, technique) {
+    const rarity = this.hakariRarity(player, technique);
     player.hakariLastRarity = rarity;
     player.hakariRollInputs.push({ technique, rarity });
     this.events.push({
@@ -739,6 +751,8 @@ class AuthoritativeMatch {
         kind: player.attack.kind,
         step: player.attack.step,
         startTick: player.attack.startTick,
+        activeTick: player.attack.activeTick,
+        endActiveTick: player.attack.endActiveTick,
         endTick: player.attack.endTick,
       } : null,
       cooldowns: player.cooldowns,
