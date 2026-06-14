@@ -6,6 +6,7 @@ const GROUND = 596;
 const MAX_HEALTH = 600;
 const MAX_ROLLBACK = 15;
 const SNAPSHOT_INTERVAL = 3;
+const DOMAIN_STARTUP_TICKS = 141;
 const EMPTY_INPUT = Object.freeze({
   move: 0, jump: false, dash: false, block: false, charge: false,
   light: false, heavy: false, special: "", domain: false, awaken: false,
@@ -98,6 +99,9 @@ function makePlayer(meta, settings) {
     attack: null,
     cooldowns: { red: 0, blue: 0, purple: 0, domain: 0 },
     domainTicks: 0,
+    domainStartupTicks: 0,
+    pendingDomainTicks: 0,
+    domainElapsedTicks: 0,
     awakeningTicks: 0,
     jackpotTicks: 0,
     unstablePurpleTicks: 0,
@@ -255,8 +259,24 @@ class AuthoritativeMatch {
       this.events.push({ kind: "purpleCollapse", slot: player.slot, tick: this.tick });
     }
     player.unstablePurpleTicks = Math.max(0, player.unstablePurpleTicks - 1);
-    player.domainTicks = Math.max(0, player.domainTicks - 1);
-    if (player.domainTicks > 0 && player.character === "sukuna" && this.tick % 30 === 0) {
+    if (player.domainStartupTicks > 0) {
+      player.domainStartupTicks--;
+      if (player.domainStartupTicks === 0 && player.pendingDomainTicks > 0) {
+        player.domainTicks = player.pendingDomainTicks;
+        player.pendingDomainTicks = 0;
+        player.domainElapsedTicks = 0;
+        this.events.push({
+          kind: "domainActive", slot: player.slot, character: player.character,
+          durationTicks: player.domainTicks, tick: this.tick,
+        });
+      }
+    } else if (player.domainTicks > 0) {
+      player.domainTicks--;
+      player.domainElapsedTicks++;
+    } else {
+      player.domainElapsedTicks = 0;
+    }
+    if (player.domainTicks > 0 && player.character === "sukuna" && player.domainElapsedTicks > 0 && player.domainElapsedTicks % 30 === 0) {
       const damage = Math.min(15, opponent.health);
       opponent.health = Math.max(0, opponent.health - damage);
       opponent.stun = Math.max(opponent.stun, 6);
@@ -290,6 +310,16 @@ class AuthoritativeMatch {
       player.health = Math.min(MAX_HEALTH, player.health + .12);
     } else {
       player.energy = Math.min(100, player.energy + .018);
+    }
+
+    const domainOpening = player.domainStartupTicks > 0 || opponent.domainStartupTicks > 0;
+    if (domainOpening) {
+      player.blocking = false;
+      player.charging = false;
+      player.attack = null;
+      player.vx = 0;
+      player.vy = 0;
+      return;
     }
 
     const frozenByVoid = opponent.domainTicks > 0 && opponent.character === "gojo";
@@ -455,14 +485,22 @@ class AuthoritativeMatch {
   startDomain(player, opponent) {
     if (player.cooldowns.domain > 0 || player.energy < 100) return;
     player.energy = 0;
+    player.vx = 0;
+    player.vy = 0;
+    player.attack = null;
+    player.blocking = false;
+    player.charging = false;
     player.cooldowns.domain = 1440;
     player.domains++;
     if (player.character === "sukuna") {
       player.sukunaDomainUses++;
       this.updateWorldSlashUnlock(player);
     }
-    const otherRecent = opponent.domainTicks > 0;
-    player.domainTicks = player.character === "gojo" ? 720 : player.character === "sukuna" ? 900 : 840;
+    const otherRecent = opponent.domainTicks > 0 || opponent.domainStartupTicks > 0;
+    player.domainTicks = 0;
+    player.pendingDomainTicks = player.character === "gojo" ? 720 : player.character === "sukuna" ? 900 : 840;
+    player.domainStartupTicks = DOMAIN_STARTUP_TICKS;
+    player.domainElapsedTicks = 0;
     if (player.character === "hakari") {
       player.hakariRollInputs = [];
       player.hakariLastRarity = "";
@@ -470,7 +508,7 @@ class AuthoritativeMatch {
     }
     this.events.push({
       kind: "domainStart", slot: player.slot, character: player.character,
-      durationTicks: player.domainTicks, tick: this.tick,
+      durationTicks: player.pendingDomainTicks, startupTicks: player.domainStartupTicks, tick: this.tick,
     });
     if (otherRecent && !this.clash) {
       this.clash = { type: "domain", ticks: 240, power: 50, last: { 1: 0, 2: 0 } };
@@ -709,6 +747,10 @@ class AuthoritativeMatch {
         winner.domainTicks = 0;
       }
       loser.domainTicks = 0;
+      winner.domainStartupTicks = 0;
+      winner.pendingDomainTicks = 0;
+      loser.domainStartupTicks = 0;
+      loser.pendingDomainTicks = 0;
       loser.hakariRollInputs = [];
       loser.stun = 90;
       loser.health = Math.max(0, loser.health - 24);
@@ -757,6 +799,8 @@ class AuthoritativeMatch {
       } : null,
       cooldowns: player.cooldowns,
       domainTicks: player.domainTicks,
+      domainStartupTicks: player.domainStartupTicks,
+      pendingDomainTicks: player.pendingDomainTicks,
       awakeningTicks: player.awakeningTicks,
       jackpotTicks: player.jackpotTicks,
       unstablePurpleTicks: player.unstablePurpleTicks,
