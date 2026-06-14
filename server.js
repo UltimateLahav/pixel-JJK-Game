@@ -4,6 +4,7 @@ const http = require("http");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { AuthoritativeMatch, TICK_MS } = require("./authoritative-match");
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
@@ -84,6 +85,7 @@ function leavePlayer(client, permanent = false) {
   const player = client.player;
   player.client = null;
   player.disconnectedAt = Date.now();
+  if (room.state === "match" && room.match) room.match.disconnect(player.slot);
   client.room = null;
   client.player = null;
   if (permanent) {
@@ -97,6 +99,7 @@ function leavePlayer(client, permanent = false) {
     if (room.state !== "lobby") {
       room.state = "lobby";
       room.result = null;
+      room.match = null;
       room.votes.clear();
     }
   }
@@ -147,6 +150,7 @@ function createRoom(client, msg) {
     loaded: new Set(),
     votes: new Set(),
     result: null,
+    match: null,
     createdAt: Date.now(),
     touchedAt: Date.now(),
   };
@@ -186,7 +190,42 @@ function reconnect(client, msg) {
   const player = room && room.players.get(String(msg.token || ""));
   if (!room || !player) return client.send({ type: "reconnectFailed" });
   attachPlayer(client, room, player);
-  if (room.state === "match") client.send({ type: "resumeMatch", room: roomView(room) });
+  if (room.state === "match" && room.match) {
+    client.send({
+      type: "resumeMatch",
+      room: roomView(room),
+      startAt: room.match.startAt,
+      snapshot: room.match.snapshot(),
+    });
+  }
+}
+
+function startAuthoritativeMatch(room, startAt, seed) {
+  const players = [...room.players.values()].map((player) => ({
+    slot: player.slot,
+    character: player.character,
+  }));
+  room.match = new AuthoritativeMatch({
+    players,
+    settings: room.settings,
+    startAt,
+    seed,
+    onSnapshot(snapshot) {
+      broadcast(room, { type: "matchSnapshot", snapshot });
+    },
+    onResult(result) {
+      if (room.result) return;
+      room.result = result;
+      room.state = "ended";
+      broadcast(room, {
+        type: "matchResult",
+        winnerSlot: result.winnerSlot,
+        stats: result.stats,
+        authoritative: true,
+      });
+      syncRoom(room);
+    },
+  });
 }
 
 function handleRoomMessage(client, msg) {
@@ -222,6 +261,7 @@ function handleRoomMessage(client, msg) {
     room.loaded.clear();
     room.votes.clear();
     room.result = null;
+    room.match = null;
     for (const p of players) {
       p.stats = null;
       p.character = null;
@@ -239,7 +279,8 @@ function handleRoomMessage(client, msg) {
     if (players.length === 2 && players.every((p) => p.locked && p.character && p.client)) {
       room.state = "loading";
       room.loaded.clear();
-      broadcast(room, { type: "matchPrepare", room: roomView(room), seed: crypto.randomInt(1_000_000_000) });
+      room.seed = crypto.randomInt(1_000_000_000);
+      broadcast(room, { type: "matchPrepare", room: roomView(room), seed: room.seed });
       syncRoom(room);
     }
   } else if (msg.type === "loaded" && room.state === "loading") {
@@ -248,24 +289,21 @@ function handleRoomMessage(client, msg) {
     if (room.loaded.size === 2) {
       room.state = "match";
       const startAt = Date.now() + 4200;
-      broadcast(room, { type: "countdown", startAt, room: roomView(room) });
+      startAuthoritativeMatch(room, startAt, room.seed);
+      broadcast(room, {
+        type: "countdown",
+        startAt,
+        startTick: 0,
+        tickRate: 60,
+        tickMs: TICK_MS,
+        room: roomView(room),
+      });
       syncRoom(room);
     }
-  } else if (msg.type === "relay" && room.state === "match") {
-    if (!["state", "hit", "event", "clash", "input"].includes(msg.channel)) return;
-    broadcast(room, {
-      type: "relay",
-      from: player.slot,
-      channel: msg.channel,
-      payload: msg.payload,
-    }, player.token);
-  } else if (msg.type === "matchOver" && room.state === "match" && !room.result) {
-    const winnerSlot = Number(msg.winnerSlot) === 2 ? 2 : 1;
-    player.stats = msg.stats || null;
-    room.result = { winnerSlot, endedAt: Date.now() };
-    room.state = "ended";
-    broadcast(room, { type: "matchResult", winnerSlot, stats: msg.stats || null });
-    syncRoom(room);
+  } else if (msg.type === "input" && room.state === "match" && room.match) {
+    room.match.receiveInput(player.slot, msg);
+  } else if ((msg.type === "relay" || msg.type === "matchOver") && room.state === "match") {
+    client.send({ type: "error", message: "AUTHORITATIVE MATCH ACCEPTS INPUTS ONLY" });
   } else if (msg.type === "stats" && room.state === "ended") {
     player.stats = msg.stats || null;
     broadcast(room, { type: "opponentStats", slot: player.slot, stats: player.stats }, player.token);
@@ -275,6 +313,7 @@ function handleRoomMessage(client, msg) {
     if (room.votes.size === room.players.size) {
       room.state = "lobby";
       room.result = null;
+      room.match = null;
       room.votes.clear();
       room.loaded.clear();
       for (const p of room.players.values()) {
@@ -302,7 +341,7 @@ function handleMessage(client, raw) {
     return client.send({ type: "error", message: "INVALID MESSAGE" });
   }
   if (!msg || typeof msg.type !== "string") return;
-  if (msg.type === "ping") return client.send({ type: "pong", sentAt: msg.sentAt });
+  if (msg.type === "ping") return client.send({ type: "pong", sentAt: msg.sentAt, serverTime: Date.now() });
   if (msg.type === "create") return createRoom(client, msg);
   if (msg.type === "join") return joinRoom(client, msg);
   if (msg.type === "reconnect") return reconnect(client, msg);
@@ -422,8 +461,16 @@ server.on("upgrade", (req, socket) => {
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
+    if (room.state === "match" && room.match) room.match.advance(now);
+  }
+}, TICK_MS).unref();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
     for (const player of [...room.players.values()]) {
       if (!player.client && player.disconnectedAt && now - player.disconnectedAt > 20_000) {
+        if (room.state === "match" && room.match && !room.result) room.match.forfeit(player.slot);
         room.players.delete(player.token);
       }
     }
