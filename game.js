@@ -121,6 +121,8 @@
     mode: "story",
     domain: 0,
     domainIntro: 0,
+    domainOwnerSlot: 0,
+    domainStartup: 0,
     domainClashPending: false,
     cinematic: 0,
     clash: null,
@@ -599,6 +601,8 @@
     game.domain = 0;
     game.domainCharacter = selectedCharacter;
     game.domainIntro = 0;
+    game.domainOwnerSlot = 0;
+    game.domainStartup = 0;
     game.cinematic = 0;
     game.clash = null;
     game.transition = 0;
@@ -655,6 +659,8 @@
     game.online.predictionHistory.clear();
     game.online.correctionX = 0;
     game.online.correctionY = 0;
+    game.domainOwnerSlot = 0;
+    game.domainStartup = 0;
     game.online.inputEdges = {
       jump: false, dash: false, light: false, heavy: false,
       special: "", domain: false, awaken: false,
@@ -1340,6 +1346,8 @@
     game.cameraFocusY = p.y - 62;
     game.shake = 7;
     game.domainCharacter = p.character;
+    game.domainOwnerSlot = game.online.active ? game.online.slot : 1;
+    game.domainStartup = 2.35;
     if (game.online.active) {
       game.online.stats.domains++;
       game.online.localDomainWindow = 1.6;
@@ -1846,6 +1854,17 @@
     }
   }
 
+  function localFrozenByUnlimitedVoid() {
+    return Boolean(
+      game.online.active
+      && game.online.authoritative
+      && game.domain > 0
+      && game.domainCharacter === "gojo"
+      && game.domainOwnerSlot > 0
+      && game.domainOwnerSlot !== game.online.slot
+    );
+  }
+
   function updatePlayer(dt) {
     const p = game.player;
     const e = game.enemy;
@@ -1856,6 +1875,15 @@
       game.online.correctionY *= .76;
       if (Math.abs(game.online.correctionX) < .05) game.online.correctionX = 0;
       if (Math.abs(game.online.correctionY) < .05) game.online.correctionY = 0;
+    }
+    if (localFrozenByUnlimitedVoid()) {
+      p.vx = 0;
+      p.vy = 0;
+      p.attack = null;
+      p.blocking = false;
+      p.charging = false;
+      p.state = "voidFrozen";
+      return;
     }
     updateHakariState(dt);
     p.stateTime += dt;
@@ -2184,6 +2212,17 @@
       e.attack = null;
     }
     if (target.character && characters[target.character]) e.character = target.character;
+    const remoteFrozenByMyUnlimitedVoid = game.domain > 0
+      && game.domainCharacter === "gojo"
+      && game.domainOwnerSlot === game.online.slot;
+    if (remoteFrozenByMyUnlimitedVoid) {
+      e.vx = 0;
+      e.vy = 0;
+      e.attack = null;
+      e.blocking = false;
+      e.charging = false;
+      e.state = "voidFrozen";
+    }
   }
 
   function enemyProjectile() {
@@ -2609,9 +2648,11 @@
     game.online.localDomainWindow = Math.max(0, game.online.localDomainWindow - dt);
     game.online.remoteDomainWindow = Math.max(0, game.online.remoteDomainWindow - dt);
     game.domain = Math.max(0, game.domain - dt);
+    game.domainStartup = Math.max(0, game.domainStartup - dt);
     game.domainIntro = Math.max(0, game.domainIntro - dt);
     game.cinematic = Math.max(0, game.cinematic - dt);
     if (game.domain <= 0 && game.domainIntro <= 0) game.windPaused = false;
+    if (game.domain <= 0 && game.domainStartup <= 0 && game.domainIntro <= 0) game.domainOwnerSlot = 0;
     if (!game.clash && game.blackFlash <= 0 && game.cinematic <= 0) game.cameraTarget = lerp(game.cameraTarget, 1, clamp(dt * 4.5, 0, 1));
     game.cameraZoom = lerp(game.cameraZoom, game.cameraTarget, clamp(dt * 7, 0, 1));
     if (!game.clash && game.player && game.enemy && game.cinematic <= 0) {
@@ -3992,18 +4033,24 @@
   function captureOnlineInput(frame) {
     if (!game.online.active || !game.player || game.state !== "playing") return null;
     const edges = game.online.inputEdges;
-    const input = {
-      move: (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0),
-      jump: edges.jump,
-      dash: edges.dash,
-      block: keys.has("s"),
-      charge: keys.has("c"),
-      light: edges.light,
-      heavy: edges.heavy,
-      special: edges.special,
-      domain: edges.domain,
-      awaken: edges.awaken,
-    };
+    const domainLocked = game.domainStartup > 0 || localFrozenByUnlimitedVoid();
+    const input = domainLocked
+      ? {
+        move: 0, jump: false, dash: false, block: false, charge: false,
+        light: false, heavy: false, special: "", domain: edges.domain, awaken: false,
+      }
+      : {
+        move: (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0),
+        jump: edges.jump,
+        dash: edges.dash,
+        block: keys.has("s"),
+        charge: keys.has("c"),
+        light: edges.light,
+        heavy: edges.heavy,
+        special: edges.special,
+        domain: edges.domain,
+        awaken: edges.awaken,
+      };
     game.online.inputEdges = {
       jump: false, dash: false, light: false, heavy: false,
       special: "", domain: false, awaken: false,
@@ -4083,13 +4130,24 @@
       game.remoteUnstablePurple = null;
     } else if (event.kind === "domainStart") {
       game.domainCharacter = event.character || "gojo";
-      game.domainIntro = 2.35;
-      game.cinematic = 2.35;
+      game.domainOwnerSlot = Number(event.slot || 0);
+      const serverIntro = game.domainStartup > 0
+        ? game.domainStartup
+        : Number(event.startupTicks || 141) / 60;
+      game.domainStartup = serverIntro;
+      game.domainIntro = serverIntro;
+      game.cinematic = serverIntro;
       game.glitch = 1.15;
       game.windPaused = true;
       game.cameraTarget = 1.22;
       announce(event.character === "sukuna" ? "MALEVOLENT SHRINE"
         : event.character === "hakari" ? "IDLE DEATH GAMBLE" : "UNLIMITED VOID");
+    } else if (event.kind === "domainActive") {
+      game.domainCharacter = event.character || game.domainCharacter;
+      game.domainOwnerSlot = Number(event.slot || game.domainOwnerSlot);
+      game.domainStartup = 0;
+      game.domainIntro = 0;
+      game.cinematic = 0;
     } else if (event.kind === "domainSlash") {
       const victim = event.slot === game.online.slot ? game.player : game.enemy;
       game.shake = Math.max(game.shake, 8);
@@ -4219,10 +4277,33 @@
     game.online.snapshotBuffer.sort((a, b) => a.snapshotTick - b.snapshotTick);
     game.online.snapshotBuffer = game.online.snapshotBuffer.slice(-24);
 
-    const domainOwner = Number(local.domainTicks || 0) >= Number(remote.domainTicks || 0) ? local : remote;
-    game.domain = Math.max(Number(local.domainTicks || 0), Number(remote.domainTicks || 0)) / 60;
-    if (game.domain > 0) {
+    const localDomainTicks = Number(local.domainTicks || 0);
+    const remoteDomainTicks = Number(remote.domainTicks || 0);
+    const localStartupTicks = Number(local.domainStartupTicks || 0);
+    const remoteStartupTicks = Number(remote.domainStartupTicks || 0);
+    const activeDomainOwner = Math.max(localDomainTicks, remoteDomainTicks) > 0
+      ? (localDomainTicks >= remoteDomainTicks ? local : remote)
+      : null;
+    const startupDomainOwner = Math.max(localStartupTicks, remoteStartupTicks) > 0
+      ? (localStartupTicks >= remoteStartupTicks ? local : remote)
+      : null;
+    const domainOwner = activeDomainOwner || startupDomainOwner;
+    game.domain = Math.max(localDomainTicks, remoteDomainTicks) / 60;
+    game.domainStartup = Math.max(localStartupTicks, remoteStartupTicks) / 60;
+    if (game.domainStartup > 0) {
+      game.domainIntro = game.domainStartup;
+      game.cinematic = game.domainStartup;
+    } else if (game.domain > 0 && game.domainIntro > 0) {
+      game.domainIntro = 0;
+      game.cinematic = 0;
+    }
+    if (domainOwner) {
       game.domainCharacter = domainOwner.character;
+      game.domainOwnerSlot = Number(domainOwner.slot || 0);
+    } else {
+      game.domainOwnerSlot = 0;
+    }
+    if (game.domain > 0) {
       game.windPaused = true;
       if (domainOwner.character === "hakari") {
         if (!game.hakariDomain) {
@@ -4240,6 +4321,7 @@
       }
     } else {
       game.hakariDomain = null;
+      if (game.domainStartup <= 0) game.windPaused = game.domainIntro > 0;
     }
 
     game.projectiles = game.projectiles.filter((projectile) => !projectile.serverOwned);
