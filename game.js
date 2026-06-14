@@ -187,7 +187,7 @@
         ["T", "UNLIMITED VOID"],
       ],
       labels: { red: "RED", blue: "BLUE", purple: "PURPLE", domain: "DOMAIN" },
-      costs: { blue: 18, red: 26, purple: 0, domain: 100 },
+      costs: { blue: 18, red: 26, purple: 82, domain: 100 },
       cooldowns: { blue: 4.5, red: 6.2, purple: 13, domain: 24 },
     },
     sukuna: {
@@ -1225,7 +1225,10 @@
   function stabilizeHollowPurple() {
     const p = game.player;
     const purple = game.unstablePurple;
-    if (!purple || purple.state !== "unstable") return;
+    if (!purple || purple.state !== "unstable" || p.energy < 82) {
+      if (purple?.state === "unstable" && p.energy < 82) announce("HOLLOW PURPLE NEEDS 82 CE");
+      return;
+    }
     purple.state = "firing";
     purple.fireTimer = .58;
     purple.timer = Math.max(purple.timer, .58);
@@ -1808,7 +1811,24 @@
       const box = attackBox(entity, attack);
       if (!attack.hit.has(target) && rectsOverlap(box, bodyBox(target))) {
         attack.hit.add(target);
-        if (applyHit(entity, target, attack)) attack.hitConfirmed = true;
+        const predictedOnlineHit = game.online.active && game.online.authoritative
+          && entity.kind === "player" && target.kind === "remote";
+        if (predictedOnlineHit) {
+          attack.hitConfirmed = true;
+          spawnParticles(
+            target.x - entity.facing * 12,
+            target.y - target.h * .58,
+            attack.color || "#64eaff",
+            attack.strong ? 16 : 8,
+            attack.strong ? 360 : 240,
+            attack.strong ? 7 : 4,
+            attack.strong ? .5 : .28
+          );
+          game.hitstop = attack.strong ? .055 : .025;
+          game.shake = Math.max(game.shake, attack.strong ? 7 : 3);
+        } else if (applyHit(entity, target, attack)) {
+          attack.hitConfirmed = true;
+        }
       }
     }
     if (attack.elapsed >= attack.duration) {
@@ -2102,11 +2122,11 @@
   function updateRemotePlayer(dt) {
     const e = game.enemy;
     let target = game.online.remoteTarget;
+    let renderTick = game.online.serverFrame - game.online.interpolationTicks;
     e.stateTime += dt;
     e.flash = Math.max(0, e.flash - dt);
     e.lagHealth = lerp(e.lagHealth, e.health, clamp(dt * 2, 0, 1));
     if (game.online.authoritative && game.online.snapshotBuffer.length) {
-      const renderTick = game.online.serverFrame - game.online.interpolationTicks;
       const snapshots = game.online.snapshotBuffer;
       let before = snapshots[0];
       let after = snapshots[snapshots.length - 1];
@@ -2147,7 +2167,22 @@
     e.charging = Boolean(target.charging);
     e.comboStep = target.comboStep;
     e.airComboStep = target.airComboStep;
-    e.attack = target.attack ? { ...target.attack, hit: new Set() } : null;
+    if (target.attack) {
+      const authoritativeElapsed = clamp((renderTick - target.attack.startTick) / 60, 0, target.attack.duration);
+      const continuedElapsed = e.attack?.startTick === target.attack.startTick
+        ? Math.min(target.attack.duration, e.attack.elapsed + dt)
+        : authoritativeElapsed;
+      const elapsed = Math.max(authoritativeElapsed, continuedElapsed);
+      const attackTick = target.attack.startTick + elapsed * 60;
+      e.attack = {
+        ...target.attack,
+        elapsed,
+        active: attackTick >= target.attack.activeTick && attackTick <= target.attack.endActiveTick,
+        hit: new Set(),
+      };
+    } else {
+      e.attack = null;
+    }
     if (target.character && characters[target.character]) e.character = target.character;
   }
 
@@ -2310,10 +2345,13 @@
         const dy = o.y - (blueTarget.y - blueTarget.h / 2);
         const dist = Math.hypot(dx, dy);
         if (dist < 340) {
-          blueTarget.vx += (dx / Math.max(1, dist)) * 940 * dt;
-          blueTarget.vy += (dy / Math.max(1, dist)) * 470 * dt;
+          const predictedRemote = game.online.active && game.online.authoritative && blueTarget.kind === "remote";
+          if (!predictedRemote) {
+            blueTarget.vx += (dx / Math.max(1, dist)) * 940 * dt;
+            blueTarget.vy += (dy / Math.max(1, dist)) * 470 * dt;
+          }
           o.tick = Number.isFinite(o.tick) ? o.tick - dt : 0;
-          if (!o.visualOnly && o.tick <= 0 && dist < 85) {
+          if (!predictedRemote && !o.visualOnly && o.tick <= 0 && dist < 85) {
             applyHit(blueAttacker, blueTarget, { name: "Blue", type: "special", damage: o.damage, kbX: 20, kbY: 0, color: "#3d8dff", fixedDamage: o.reflected });
             o.tick = .38;
           }
@@ -2329,6 +2367,8 @@
       const box = { x: o.x - o.w / 2, y: o.y - o.h / 2, w: o.w, h: o.h };
       if (o.type !== "blue" && !o.hitTarget && rectsOverlap(box, bodyBox(target))) {
         const attacker = o.owner === "player" ? p : e;
+        const predictedRemote = game.online.active && game.online.authoritative
+          && attacker.kind === "player" && target.kind === "remote";
         const projectileNames = {
           purple: "Hollow Purple",
           red: "Reversal: Red",
@@ -2337,15 +2377,26 @@
           door: "Shutter Doors",
           reserveBall: "Reserve Ball",
         };
-        applyHit(attacker, target, {
-          name: projectileNames[o.type] || "Cursed Shot",
-          type: "special", damage: o.damage, kbX: o.kbX, kbY: o.kbY, strong: o.strong,
-          fixedDamage: o.reflected,
-          reaction: o.type === "dismantle" || o.type === "worldSlash" ? "slash" : o.type === "door" ? "body" : undefined,
-          color: o.type === "door" || o.type === "reserveBall" ? "#55f087"
-            : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
-            : o.owner === "player" ? (o.type === "red" ? "#ff315f" : "#8d55ff") : "#ff4c73",
-        });
+        if (predictedRemote) {
+          spawnParticles(
+            target.x, target.y - target.h * .55,
+            o.type === "door" || o.type === "reserveBall" ? "#55f087"
+              : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
+              : o.type === "red" ? "#ff315f" : "#8d55ff",
+            o.strong ? 22 : 12, o.strong ? 430 : 290, o.strong ? 8 : 5, o.strong ? .65 : .38
+          );
+          game.shake = Math.max(game.shake, o.strong ? 10 : 4);
+        } else {
+          applyHit(attacker, target, {
+            name: projectileNames[o.type] || "Cursed Shot",
+            type: "special", damage: o.damage, kbX: o.kbX, kbY: o.kbY, strong: o.strong,
+            fixedDamage: o.reflected,
+            reaction: o.type === "dismantle" || o.type === "worldSlash" ? "slash" : o.type === "door" ? "body" : undefined,
+            color: o.type === "door" || o.type === "reserveBall" ? "#55f087"
+              : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
+              : o.owner === "player" ? (o.type === "red" ? "#ff315f" : "#8d55ff") : "#ff4c73",
+          });
+        }
         if (o.type === "purple") {
           damageProps(p, { strong: true, damage: 50, range: 400, y: -150, h: 180 });
         }
@@ -2408,7 +2459,8 @@
     const dx = purple.x - e.x;
     const dy = purple.y - (e.y - e.h / 2);
     const distance = Math.hypot(dx, dy);
-    if (distance < 330) {
+    const predictedRemote = game.online.active && game.online.authoritative && e.kind === "remote";
+    if (distance < 330 && !predictedRemote) {
       const chaos = Math.sin(performance.now() * .02) > 0 ? 1 : -1;
       e.vx += (dx / Math.max(1, distance)) * 660 * dt * chaos;
       e.vy += (dy / Math.max(1, distance)) * 320 * dt * chaos;
@@ -3984,6 +4036,10 @@
     return {
       name: names[attack.kind] || attack.kind.toUpperCase(),
       type: attack.kind,
+      startTick: attack.startTick,
+      activeTick: attack.activeTick,
+      endActiveTick: attack.endActiveTick,
+      endTick: attack.endTick,
       elapsed: clamp((snapshotTick - attack.startTick) / 60, 0, duration),
       duration,
       start: .1,
@@ -4118,8 +4174,8 @@
       game.online.correctionX = 0;
       game.online.correctionY = 0;
     } else {
-      game.online.correctionX += errorX;
-      game.online.correctionY += errorY;
+      game.online.correctionX = Math.abs(errorX) < 8 ? 0 : clamp(errorX * .7, -60, 60);
+      game.online.correctionY = Math.abs(errorY) < 6 ? 0 : clamp(errorY * .7, -48, 48);
     }
     game.player.health = local.health;
     game.player.maxHealth = local.maxHealth || 600;
@@ -4156,7 +4212,11 @@
       attack: authoritativeAttack(remote, snapshot.tick),
       snapshotTick: snapshot.tick,
     };
-    game.online.snapshotBuffer.push(remoteTarget);
+    if (snapshot.correction) game.online.snapshotBuffer.length = 0;
+    const existingSnapshot = game.online.snapshotBuffer.findIndex((entry) => entry.snapshotTick === snapshot.tick);
+    if (existingSnapshot >= 0) game.online.snapshotBuffer[existingSnapshot] = remoteTarget;
+    else game.online.snapshotBuffer.push(remoteTarget);
+    game.online.snapshotBuffer.sort((a, b) => a.snapshotTick - b.snapshotTick);
     game.online.snapshotBuffer = game.online.snapshotBuffer.slice(-24);
 
     const domainOwner = Number(local.domainTicks || 0) >= Number(remote.domainTicks || 0) ? local : remote;
