@@ -1,483 +1,485 @@
-(() => {
-  "use strict";
+"use strict";
 
-  const $ = (selector) => document.querySelector(selector);
-  const ui = {
-    menu: $("#menu"),
-    panel: $("#onlineMenu"),
-    home: $("#onlineHome"),
-    lobby: $("#onlineLobby"),
-    intro: $("#onlineIntro"),
-    name: $("#onlineName"),
-    error: $("#onlineError"),
-    status: $("#serverStatus"),
-    joinBox: $("#joinBox"),
-    codeInput: $("#roomCodeInput"),
-    code: $("#roomCode"),
-    connection: $("#lobbyConnection"),
-    waiting: $("#waitingText"),
-    ready: $("#readyButton"),
-    start: $("#startOnlineMatch"),
-    maps: $("#onlineMaps"),
-    time: $("#onlineTime"),
-    energy: $("#onlineEnergy"),
-    chatLog: $("#chatLog"),
-    chatInput: $("#chatInput"),
-    hostOnly: $("#hostOnly"),
-    countdown: $("#fightCountdown"),
-    loading: $("#loadingStatus"),
-    introP1: $("#introP1"),
-    introP2: $("#introP2"),
+const http = require("http");
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { AuthoritativeMatch, TICK_MS } = require("./authoritative-match");
+
+const PORT = Number(process.env.PORT || 4173);
+const ROOT = __dirname;
+const rooms = new Map();
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".json": "application/json; charset=utf-8",
+};
+
+function roomCode() {
+  let code;
+  do {
+    code = Array.from({ length: 7 }, () => CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]).join("");
+  } while (rooms.has(code));
+  return code;
+}
+
+function token() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
+function safeName(value) {
+  return String(value || "Gojo").replace(/[<>&]/g, "").trim().slice(0, 16) || "Gojo";
+}
+
+function roomView(room) {
+  return {
+    code: room.code,
+    state: room.state,
+    hostSlot: room.players.get(room.hostToken)?.slot || 1,
+    map: room.map,
+    settings: room.settings,
+    players: [...room.players.values()]
+      .sort((a, b) => a.slot - b.slot)
+      .map((p) => ({
+        slot: p.slot,
+        name: p.name,
+        ready: p.ready,
+        character: p.character,
+        locked: p.locked,
+        connected: Boolean(p.client),
+        ping: p.ping,
+      })),
   };
+}
 
-  const state = {
-    socket: null,
-    room: null,
-    token: "",
-    slot: 0,
+function broadcast(room, message, exceptToken = "") {
+  for (const player of room.players.values()) {
+    if (player.client && player.token !== exceptToken) player.client.send(message);
+  }
+}
+
+function syncRoom(room) {
+  broadcast(room, { type: "roomState", room: roomView(room) });
+}
+
+function destroyRoom(room) {
+  rooms.delete(room.code);
+  for (const player of room.players.values()) {
+    if (player.client) {
+      player.client.room = null;
+      player.client.send({ type: "roomClosed" });
+    }
+  }
+}
+
+function leavePlayer(client, permanent = false) {
+  const room = client.room;
+  if (!room || !client.player) return;
+  const player = client.player;
+  player.client = null;
+  player.disconnectedAt = Date.now();
+  if (room.state === "match" && room.match) room.match.disconnect(player.slot);
+  client.room = null;
+  client.player = null;
+  if (permanent) {
+    room.players.delete(player.token);
+    if (!room.players.size) return destroyRoom(room);
+    if (room.hostToken === player.token) {
+      const next = [...room.players.values()].sort((a, b) => a.slot - b.slot)[0];
+      room.hostToken = next.token;
+      next.slot = 1;
+    }
+    if (room.state !== "lobby") {
+      room.state = "lobby";
+      room.result = null;
+      room.match = null;
+      room.votes.clear();
+    }
+  }
+  syncRoom(room);
+  broadcast(room, { type: "connection", slot: player.slot, connected: false });
+}
+
+function attachPlayer(client, room, player) {
+  if (client.room && client.room !== room) leavePlayer(client, true);
+  if (player.client && player.client !== client) player.client.close();
+  player.client = client;
+  player.disconnectedAt = 0;
+  client.room = room;
+  client.player = player;
+  client.send({
+    type: "joined",
+    token: player.token,
+    slot: player.slot,
+    room: roomView(room),
+  });
+  syncRoom(room);
+  broadcast(room, { type: "connection", slot: player.slot, connected: true });
+}
+
+function createRoom(client, msg) {
+  const code = roomCode();
+  const playerToken = token();
+  const player = {
+    token: playerToken,
+    slot: 1,
+    name: safeName(msg.name),
     ready: false,
-    intentionalClose: false,
-    reconnectTimer: 0,
-    reconnectDelay: 800,
-    pingSentAt: 0,
+    character: null,
+    locked: false,
     ping: 0,
-    matchActive: false,
+    client,
+    disconnectedAt: 0,
+    stats: null,
   };
+  const room = {
+    code,
+    state: "lobby",
+    hostToken: playerToken,
+    map: "shinjuku",
+    settings: { time: 99, energy: 70 },
+    players: new Map([[playerToken, player]]),
+    chat: [],
+    loaded: new Set(),
+    votes: new Set(),
+    result: null,
+    match: null,
+    createdAt: Date.now(),
+    touchedAt: Date.now(),
+  };
+  rooms.set(code, room);
+  client.room = room;
+  client.player = player;
+  client.send({ type: "joined", token: playerToken, slot: 1, room: roomView(room) });
+}
 
-  const socketUrl = location.protocol === "file:"
-    ? "ws://localhost:4173/socket"
-    : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/socket`;
+function joinRoom(client, msg) {
+  const code = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const room = rooms.get(code);
+  if (!room) return client.send({ type: "error", message: "ROOM NOT FOUND" });
+  if (room.state !== "lobby") return client.send({ type: "error", message: "MATCH ALREADY STARTED" });
+  if (room.players.size >= 2) return client.send({ type: "error", message: "ROOM IS FULL" });
+  const playerToken = token();
+  const used = new Set([...room.players.values()].map((p) => p.slot));
+  const player = {
+    token: playerToken,
+    slot: used.has(1) ? 2 : 1,
+    name: safeName(msg.name),
+    ready: false,
+    character: null,
+    locked: false,
+    ping: 0,
+    client,
+    disconnectedAt: 0,
+    stats: null,
+  };
+  room.players.set(playerToken, player);
+  room.touchedAt = Date.now();
+  attachPlayer(client, room, player);
+}
 
-  function setStatus(text, online = false) {
-    ui.status.textContent = text;
-    ui.status.classList.toggle("online", online);
-    ui.connection.textContent = text;
-    ui.connection.classList.toggle("reconnecting", !online);
-  }
-
-  function showError(message = "") {
-    ui.error.textContent = message;
-  }
-
-  function openOnline() {
-    ui.menu.classList.add("hidden");
-    ui.panel.classList.remove("hidden");
-    if (state.room) showLobby();
-    else showHome();
-    connect();
-  }
-
-  function closeOnline() {
-    ui.panel.classList.add("hidden");
-    ui.intro.classList.add("hidden");
-    ui.menu.classList.remove("hidden");
-    showError("");
-  }
-
-  function showHome() {
-    ui.panel.classList.remove("hidden");
-    ui.home.classList.remove("hidden");
-    ui.lobby.classList.add("hidden");
-  }
-
-  function showLobby() {
-    ui.panel.classList.remove("hidden");
-    ui.home.classList.add("hidden");
-    ui.lobby.classList.remove("hidden");
-  }
-
-  function connect() {
-    if (state.socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(state.socket.readyState)) return;
-    state.intentionalClose = false;
-    setStatus("CONNECTING");
-    const socket = new WebSocket(socketUrl);
-    state.socket = socket;
-    socket.addEventListener("open", () => {
-      state.reconnectDelay = 800;
-      setStatus("CONNECTED", true);
-      showError("");
-      const saved = loadSession();
-      if (saved?.code && saved?.token) {
-        send({ type: "reconnect", code: saved.code, token: saved.token });
-      }
-    });
-    socket.addEventListener("message", (event) => {
-      let message;
-      try { message = JSON.parse(event.data); } catch { return; }
-      handleMessage(message);
-    });
-    socket.addEventListener("close", () => {
-      setStatus("RECONNECTING");
-      if (!state.intentionalClose) scheduleReconnect();
-    });
-    socket.addEventListener("error", () => {
-      showError("ONLINE SERVER OFFLINE - RUN start-online.bat");
+function reconnect(client, msg) {
+  const room = rooms.get(String(msg.code || "").toUpperCase());
+  const player = room && room.players.get(String(msg.token || ""));
+  if (!room || !player) return client.send({ type: "reconnectFailed" });
+  attachPlayer(client, room, player);
+  if (room.state === "match" && room.match) {
+    client.send({
+      type: "resumeMatch",
+      room: roomView(room),
+      startAt: room.match.startAt,
+      snapshot: room.match.snapshot(),
     });
   }
+}
 
-  function scheduleReconnect() {
-    clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = setTimeout(connect, state.reconnectDelay);
-    state.reconnectDelay = Math.min(5000, state.reconnectDelay * 1.5);
-  }
-
-  function send(message) {
-    if (state.socket?.readyState === WebSocket.OPEN) {
-      state.socket.send(JSON.stringify(message));
-      return true;
-    }
-    connect();
-    showError("CONNECTING TO ONLINE SERVER...");
-    return false;
-  }
-
-  function saveSession() {
-    try {
-      sessionStorage.setItem("voidLimitOnline", JSON.stringify({
-        code: state.room?.code,
-        token: state.token,
-        name: ui.name.value,
-      }));
-    } catch {}
-  }
-
-  function loadSession() {
-    try {
-      return JSON.parse(sessionStorage.getItem("voidLimitOnline") || "null");
-    } catch {
-      return null;
-    }
-  }
-
-  function clearSession() {
-    try { sessionStorage.removeItem("voidLimitOnline"); } catch {}
-  }
-
-  function handleMessage(message) {
-    if (message.type === "error") {
-      showError(message.message);
-    } else if (message.type === "joined") {
-      state.token = message.token;
-      state.slot = message.slot;
-      state.room = message.room;
-      state.ready = false;
-      saveSession();
-      showLobby();
-      renderRoom();
-      if (state.room.state === "selecting") openNetworkCharacterSelect();
-    } else if (message.type === "roomState") {
-      state.room = message.room;
-      const self = state.room.players.find((player) => player.slot === state.slot);
-      if (self) {
-        state.slot = self.slot;
-        state.ready = self.ready;
-      }
-      renderRoom();
-      if (state.room.state === "selecting") {
-        if ($("#characterSelect").classList.contains("hidden")) openNetworkCharacterSelect();
-        window.VoidLimitOnline?.selectionState?.(state.room, state.slot);
-      } else if (state.room.state === "lobby" && !$("#characterSelect").classList.contains("hidden")) {
-        window.VoidLimitOnline?.hideSelection?.();
-        showLobby();
-      }
-    } else if (message.type === "chat") {
-      appendChat(message.entry);
-    } else if (message.type === "pong") {
-      state.ping = Math.max(1, Date.now() - Number(message.sentAt || Date.now()));
-      send({ type: "latency", ping: state.ping });
-    } else if (message.type === "characterSelect") {
-      state.room = message.room;
-      openNetworkCharacterSelect();
-    } else if (message.type === "matchPrepare") {
-      state.room = message.room;
-      window.VoidLimitOnline?.hideSelection?.();
-      prepareMatch();
-    } else if (message.type === "loadProgress") {
-      ui.loading.textContent = `LOADING ${message.loaded} / ${message.total}`;
-    } else if (message.type === "countdown") {
-      state.room = message.room;
-      beginCountdown(message.startAt);
-    } else if (message.type === "relay") {
-      window.VoidLimitOnline?.receive?.(message.channel, message.payload, message.from);
-    } else if (message.type === "matchResult") {
-      state.matchActive = false;
-      window.VoidLimitOnline?.finish?.(message.winnerSlot === state.slot, message.stats || null);
-      send({ type: "stats", stats: window.VoidLimitOnline?.stats?.() || {} });
-    } else if (message.type === "opponentStats") {
-      window.VoidLimitOnline?.opponentStats?.(message.stats);
-    } else if (message.type === "backToLobby") {
-      state.matchActive = false;
-      ui.intro.classList.add("hidden");
-      showLobby();
-      window.VoidLimitOnline?.returnToLobby?.();
-      renderRoom();
-      if (message.rematch && isHost()) setTimeout(() => send({ type: "start" }), 250);
-    } else if (message.type === "reconnectFailed" || message.type === "roomClosed") {
-      state.room = null;
-      state.token = "";
-      state.slot = 0;
-      clearSession();
-      showHome();
-      if (message.type === "roomClosed") showError("ROOM CLOSED");
-    } else if (message.type === "resumeMatch") {
-      state.room = message.room;
-      const wasActive = state.matchActive;
-      state.matchActive = true;
-      showError("");
-      if (!wasActive) {
-        window.VoidLimitOnline?.start?.({
-          slot: state.slot,
-          map: state.room.map,
-          time: state.room.settings.time,
-          energy: state.room.settings.energy,
-          startAt: Date.now() + 800,
-          localName: state.room.players.find((p) => p.slot === state.slot)?.name || "Gojo",
-          remoteName: state.room.players.find((p) => p.slot !== state.slot)?.name || "Gojo",
-          localCharacter: state.room.players.find((p) => p.slot === state.slot)?.character || "gojo",
-          remoteCharacter: state.room.players.find((p) => p.slot !== state.slot)?.character || "gojo",
-        });
-        ui.panel.classList.add("hidden");
-      }
-    }
-  }
-
-  function isHost() {
-    return Boolean(state.room && state.room.hostSlot === state.slot);
-  }
-
-  function renderRoom() {
-    if (!state.room) return;
-    ui.code.textContent = state.room.code;
-    ui.waiting.textContent = state.room.players.length < 2
-      ? "WAITING FOR PLAYER..."
-      : state.room.players.some((player) => !player.connected) ? "PLAYER RECONNECTING..." : "BOTH FIGHTERS CONNECTED";
-    ui.waiting.style.color = state.room.players.length === 2 ? "#65f6b1" : "#ffbd55";
-
-    for (let slot = 1; slot <= 2; slot++) {
-      const card = $(`#slot${slot}`);
-      const player = state.room.players.find((item) => item.slot === slot);
-      card.querySelector(".slot-name").textContent = player?.name || "OPEN SLOT";
-      card.querySelector(".slot-ping").textContent = player ? `${player.connected ? player.ping || "--" : "OFFLINE"} ms` : "-- ms";
-      card.querySelector(".slot-ready").textContent = player?.ready ? "READY" : "NOT READY";
-      card.classList.toggle("ready", Boolean(player?.ready));
-      card.classList.toggle("offline", Boolean(player && !player.connected));
-    }
-
-    const host = isHost();
-    ui.hostOnly.textContent = host ? "HOST CONTROL" : "HOST LOCKED";
-    ui.maps.classList.toggle("readonly", !host);
-    ui.maps.querySelectorAll("button").forEach((button) => {
-      button.classList.toggle("active", button.dataset.map === state.room.map);
-      button.disabled = !host;
-    });
-    ui.time.value = String(state.room.settings.time);
-    ui.energy.value = String(state.room.settings.energy);
-    ui.time.disabled = !host;
-    ui.energy.disabled = !host;
-    ui.ready.textContent = state.ready ? "NOT READY" : "READY";
-    ui.ready.disabled = state.room.state !== "lobby";
-    const everybodyReady = state.room.players.length === 2 &&
-      state.room.players.every((player) => player.ready && player.connected);
-    ui.start.classList.toggle("hidden", !host);
-    ui.start.disabled = !host || !everybodyReady || state.room.state !== "lobby";
-  }
-
-  function appendChat(entry) {
-    const line = document.createElement("p");
-    const name = document.createElement("b");
-    name.className = entry.slot === 2 ? "p2" : "";
-    name.textContent = `${entry.name}: `;
-    line.append(name, document.createTextNode(entry.text));
-    ui.chatLog.append(line);
-    ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
-  }
-
-  function openNetworkCharacterSelect() {
-    const local = state.room?.players.find((p) => p.slot === state.slot);
-    const remote = state.room?.players.find((p) => p.slot !== state.slot);
-    ui.panel.classList.add("hidden");
-    window.VoidLimitOnline?.select?.({
-      online: true,
-      character: local?.character || "gojo",
-      localName: local?.name || "PLAYER",
-      remoteName: remote?.name || "OPPONENT",
-    });
-    window.VoidLimitOnline?.selectionState?.(state.room, state.slot);
-  }
-
-  function prepareMatch() {
-    ui.intro.classList.remove("hidden");
-    ui.loading.textContent = "LOADING BATTLE MAP";
-    ui.countdown.textContent = "...";
-    const local = state.room.players.find((p) => p.slot === state.slot);
-    const remote = state.room.players.find((p) => p.slot !== state.slot);
-    window.VoidLimitOnline?.versus?.({
-      slot: state.slot,
-      localCharacter: local?.character || "gojo",
-      remoteCharacter: remote?.character || "gojo",
-      localName: local?.name || "PLAYER",
-      remoteName: remote?.name || "OPPONENT",
-    });
-    const mapAssets = {
-      shinjuku: "assets/stage-shinjuku.png",
-      shibuya: "assets/stage-shibuya.png",
-      jujutsuHigh: "assets/stage-jujutsu-high.png",
-      kyoto: "assets/stage-kyoto.png",
-    };
-    const image = new Image();
-    const done = () => send({ type: "loaded" });
-    image.onload = done;
-    image.onerror = done;
-    image.src = mapAssets[state.room.map];
-  }
-
-  function beginCountdown(startAt) {
-    state.matchActive = true;
-    ui.panel.classList.add("hidden");
-    ui.intro.classList.remove("hidden");
-    const p1 = state.room.players.find((p) => p.slot === 1);
-    const p2 = state.room.players.find((p) => p.slot === 2);
-    ui.introP1.textContent = p1?.name || "PLAYER 1";
-    ui.introP2.textContent = p2?.name || "PLAYER 2";
-    ui.loading.textContent = "CONNECTION LOCKED - FIGHTERS SYNCHRONIZED";
-    const local = state.room.players.find((p) => p.slot === state.slot);
-    const remote = state.room.players.find((p) => p.slot !== state.slot);
-    window.VoidLimitOnline?.versus?.({
-      slot: state.slot,
-      localCharacter: local?.character || "gojo",
-      remoteCharacter: remote?.character || "gojo",
-      localName: local?.name || "Gojo",
-      remoteName: remote?.name || "Gojo",
-    });
-    window.VoidLimitOnline?.start?.({
-      slot: state.slot,
-      map: state.room.map,
-      time: state.room.settings.time,
-      energy: state.room.settings.energy,
-      startAt,
-      localName: state.room.players.find((p) => p.slot === state.slot)?.name || "Gojo",
-      remoteName: state.room.players.find((p) => p.slot !== state.slot)?.name || "Gojo",
-      localCharacter: local?.character || "gojo",
-      remoteCharacter: remote?.character || "gojo",
-    });
-
-    const timer = setInterval(() => {
-      const remaining = startAt - Date.now();
-      ui.countdown.textContent = remaining > 3000 ? "3" : remaining > 2000 ? "2" : remaining > 1000 ? "1" : remaining > 0 ? "FIGHT!" : "";
-      if (remaining <= -350) {
-        clearInterval(timer);
-        ui.intro.classList.add("hidden");
-      }
-    }, 50);
-  }
-
-  function leaveRoom() {
-    if (state.room) send({ type: "leave" });
-    state.room = null;
-    state.token = "";
-    state.slot = 0;
-    state.ready = false;
-    state.matchActive = false;
-    clearSession();
-    window.VoidLimitOnline?.leave?.();
-    showHome();
-  }
-
-  $("#onlineBattle").addEventListener("click", openOnline);
-  $("#onlineBack").addEventListener("click", () => {
-    if (state.room) leaveRoom();
-    closeOnline();
-  });
-  $("#showJoin").addEventListener("click", () => {
-    ui.joinBox.classList.toggle("hidden");
-    ui.codeInput.focus();
-  });
-  $("#createRoom").addEventListener("click", () => {
-    showError("");
-    send({ type: "create", name: ui.name.value });
-  });
-  $("#joinRoom").addEventListener("click", () => {
-    const code = ui.codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (code.length < 6) return showError("ENTER A VALID ROOM CODE");
-    showError("");
-    send({ type: "join", code, name: ui.name.value });
-  });
-  ui.codeInput.addEventListener("input", () => {
-    ui.codeInput.value = ui.codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  });
-  ui.codeInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") $("#joinRoom").click();
-  });
-  $("#copyCode").addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(state.room?.code || "");
-      $("#copyCode").textContent = "COPIED";
-      setTimeout(() => { $("#copyCode").textContent = "COPY"; }, 900);
-    } catch {
-      showError(`ROOM CODE: ${state.room?.code || ""}`);
-    }
-  });
-  ui.ready.addEventListener("click", () => send({ type: "ready", ready: !state.ready }));
-  ui.start.addEventListener("click", () => send({ type: "start" }));
-  $("#leaveRoom").addEventListener("click", leaveRoom);
-  ui.maps.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (isHost()) send({ type: "map", map: button.dataset.map });
-    });
-  });
-  [ui.time, ui.energy].forEach((control) => control.addEventListener("change", () => {
-    if (isHost()) send({ type: "settings", time: Number(ui.time.value), energy: Number(ui.energy.value) });
+function startAuthoritativeMatch(room, startAt, seed) {
+  const players = [...room.players.values()].map((player) => ({
+    slot: player.slot,
+    character: player.character,
   }));
-  $("#chatForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const text = ui.chatInput.value.trim();
-    if (!text) return;
-    send({ type: "chat", text });
-    ui.chatInput.value = "";
-  });
-
-  window.addEventListener("voidlimit:rematch", () => send({ type: "rematch" }));
-  window.addEventListener("voidlimit:returnLobby", () => send({ type: "returnLobby" }));
-  window.addEventListener("voidlimit:leaveOnline", () => {
-    leaveRoom();
-    closeOnline();
-  });
-  window.addEventListener("voidlimit:characterLocked", (event) => {
-    send({ type: "character", character: event.detail?.character || "gojo", locked: true });
-  });
-  window.addEventListener("voidlimit:characterPreview", (event) => {
-    send({ type: "character", character: event.detail?.character || "gojo", locked: false });
-  });
-
-  setInterval(() => {
-    if (state.matchActive) {
-      const snapshot = window.VoidLimitOnline?.snapshot?.();
-      if (snapshot) send({ type: "relay", channel: "state", payload: snapshot });
-    }
-  }, 50);
-
-  setInterval(() => {
-    if (state.socket?.readyState === WebSocket.OPEN) {
-      state.pingSentAt = Date.now();
-      send({ type: "ping", sentAt: state.pingSentAt });
-    }
-  }, 2000);
-
-  window.addEventListener("beforeunload", () => {
-    state.intentionalClose = true;
-  });
-
-  window.VoidLimitNetwork = {
-    send(channel, payload) {
-      if (channel === "matchOver") return send({ type: "matchOver", ...payload });
-      if (channel === "stats") return send({ type: "stats", stats: payload });
-      return send({ type: "relay", channel, payload });
+  room.match = new AuthoritativeMatch({
+    players,
+    settings: room.settings,
+    startAt,
+    seed,
+    onSnapshot(snapshot) {
+      broadcast(room, { type: "matchSnapshot", snapshot });
     },
-    room: () => state.room,
-    slot: () => state.slot,
+    onResult(result) {
+      if (room.result) return;
+      room.result = result;
+      room.state = "ended";
+      broadcast(room, {
+        type: "matchResult",
+        winnerSlot: result.winnerSlot,
+        stats: result.stats,
+        authoritative: true,
+      });
+      syncRoom(room);
+    },
+  });
+}
+
+function handleRoomMessage(client, msg) {
+  const room = client.room;
+  const player = client.player;
+  if (!room || !player) return client.send({ type: "error", message: "NOT IN A ROOM" });
+  room.touchedAt = Date.now();
+  const isHost = room.hostToken === player.token;
+
+  if (msg.type === "ready" && room.state === "lobby") {
+    player.ready = Boolean(msg.ready);
+    syncRoom(room);
+  } else if (msg.type === "map" && room.state === "lobby" && isHost) {
+    if (["shinjuku", "shibuya", "jujutsuHigh", "kyoto"].includes(msg.map)) room.map = msg.map;
+    syncRoom(room);
+  } else if (msg.type === "settings" && room.state === "lobby" && isHost) {
+    room.settings.time = [60, 99, 180].includes(Number(msg.time)) ? Number(msg.time) : room.settings.time;
+    room.settings.energy = [50, 70, 100].includes(Number(msg.energy)) ? Number(msg.energy) : room.settings.energy;
+    syncRoom(room);
+  } else if (msg.type === "chat") {
+    const text = String(msg.text || "").replace(/[<>&]/g, "").trim().slice(0, 120);
+    if (!text) return;
+    const entry = { name: player.name, slot: player.slot, text, at: Date.now() };
+    room.chat.push(entry);
+    room.chat = room.chat.slice(-30);
+    broadcast(room, { type: "chat", entry });
+  } else if (msg.type === "start" && room.state === "lobby" && isHost) {
+    const players = [...room.players.values()];
+    if (players.length !== 2 || players.some((p) => !p.ready || !p.client)) {
+      return client.send({ type: "error", message: "BOTH PLAYERS MUST BE CONNECTED AND READY" });
+    }
+    room.state = "selecting";
+    room.loaded.clear();
+    room.votes.clear();
+    room.result = null;
+    room.match = null;
+    for (const p of players) {
+      p.stats = null;
+      p.character = null;
+      p.locked = false;
+    }
+    broadcast(room, { type: "characterSelect", room: roomView(room) });
+    syncRoom(room);
+  } else if (msg.type === "character" && room.state === "selecting") {
+    if (!["gojo", "sukuna", "hakari"].includes(msg.character)) return;
+    if (player.locked) return;
+    player.character = msg.character;
+    player.locked = Boolean(msg.locked);
+    syncRoom(room);
+    const players = [...room.players.values()];
+    if (players.length === 2 && players.every((p) => p.locked && p.character && p.client)) {
+      room.state = "loading";
+      room.loaded.clear();
+      room.seed = crypto.randomInt(1_000_000_000);
+      broadcast(room, { type: "matchPrepare", room: roomView(room), seed: room.seed });
+      syncRoom(room);
+    }
+  } else if (msg.type === "loaded" && room.state === "loading") {
+    room.loaded.add(player.token);
+    broadcast(room, { type: "loadProgress", loaded: room.loaded.size, total: 2 });
+    if (room.loaded.size === 2) {
+      room.state = "match";
+      const startAt = Date.now() + 4200;
+      startAuthoritativeMatch(room, startAt, room.seed);
+      broadcast(room, {
+        type: "countdown",
+        startAt,
+        startTick: 0,
+        tickRate: 60,
+        tickMs: TICK_MS,
+        room: roomView(room),
+      });
+      syncRoom(room);
+    }
+  } else if (msg.type === "input" && room.state === "match" && room.match) {
+    room.match.receiveInput(player.slot, msg);
+  } else if ((msg.type === "relay" || msg.type === "matchOver") && room.state === "match") {
+    client.send({ type: "error", message: "AUTHORITATIVE MATCH ACCEPTS INPUTS ONLY" });
+  } else if (msg.type === "stats" && room.state === "ended") {
+    player.stats = msg.stats || null;
+    broadcast(room, { type: "opponentStats", slot: player.slot, stats: player.stats }, player.token);
+  } else if ((msg.type === "rematch" || msg.type === "returnLobby") && room.state === "ended") {
+    room.votes.add(player.token);
+    broadcast(room, { type: "vote", action: msg.type, slot: player.slot });
+    if (room.votes.size === room.players.size) {
+      room.state = "lobby";
+      room.result = null;
+      room.match = null;
+      room.votes.clear();
+      room.loaded.clear();
+      for (const p of room.players.values()) {
+        p.ready = msg.type === "rematch";
+        p.stats = null;
+        p.character = null;
+        p.locked = false;
+      }
+      broadcast(room, { type: "backToLobby", rematch: msg.type === "rematch" });
+      syncRoom(room);
+    }
+  } else if (msg.type === "leave") {
+    leavePlayer(client, true);
+  } else if (msg.type === "latency") {
+    player.ping = Math.max(0, Math.min(999, Number(msg.ping) || 0));
+    syncRoom(room);
+  }
+}
+
+function handleMessage(client, raw) {
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return client.send({ type: "error", message: "INVALID MESSAGE" });
+  }
+  if (!msg || typeof msg.type !== "string") return;
+  if (msg.type === "ping") return client.send({ type: "pong", sentAt: msg.sentAt, serverTime: Date.now() });
+  if (msg.type === "create") return createRoom(client, msg);
+  if (msg.type === "join") return joinRoom(client, msg);
+  if (msg.type === "reconnect") return reconnect(client, msg);
+  handleRoomMessage(client, msg);
+}
+
+function encodeFrame(data, opcode = 1) {
+  const payload = Buffer.from(data);
+  let header;
+  if (payload.length < 126) {
+    header = Buffer.from([0x80 | opcode, payload.length]);
+  } else if (payload.length < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 126;
+    header.writeUInt16BE(payload.length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(payload.length), 2);
+  }
+  return Buffer.concat([header, payload]);
+}
+
+function websocketClient(socket) {
+  const client = {
+    socket,
+    buffer: Buffer.alloc(0),
+    room: null,
+    player: null,
+    alive: true,
+    send(value) {
+      if (!socket.destroyed) socket.write(encodeFrame(JSON.stringify(value)));
+    },
+    close() {
+      if (!socket.destroyed) socket.end(encodeFrame("", 8));
+    },
   };
 
-  const saved = loadSession();
-  if (saved?.name) ui.name.value = saved.name;
-  connect();
-})();
+  socket.on("data", (chunk) => {
+    client.buffer = Buffer.concat([client.buffer, chunk]);
+    while (client.buffer.length >= 2) {
+      const first = client.buffer[0];
+      const second = client.buffer[1];
+      const opcode = first & 0x0f;
+      const masked = Boolean(second & 0x80);
+      let length = second & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (client.buffer.length < 4) return;
+        length = client.buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (client.buffer.length < 10) return;
+        const big = client.buffer.readBigUInt64BE(2);
+        if (big > BigInt(1_000_000)) return socket.destroy();
+        length = Number(big);
+        offset = 10;
+      }
+      const maskBytes = masked ? 4 : 0;
+      if (client.buffer.length < offset + maskBytes + length) return;
+      const mask = masked ? client.buffer.subarray(offset, offset + 4) : null;
+      offset += maskBytes;
+      const payload = Buffer.from(client.buffer.subarray(offset, offset + length));
+      client.buffer = client.buffer.subarray(offset + length);
+      if (masked) {
+        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+      }
+      if (opcode === 8) return socket.end();
+      if (opcode === 9) {
+        socket.write(encodeFrame(payload, 10));
+        continue;
+      }
+      if (opcode === 1) handleMessage(client, payload.toString("utf8"));
+    }
+  });
+  socket.on("close", () => leavePlayer(client, false));
+  socket.on("error", () => socket.destroy());
+  return client;
+}
+
+const server = http.createServer((req, res) => {
+  const rawPath = decodeURIComponent((req.url || "/").split("?")[0]);
+  const relative = rawPath === "/" ? "index.html" : rawPath.replace(/^\/+/, "");
+  const file = path.resolve(ROOT, relative);
+  if (!file.startsWith(ROOT) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Not found");
+  }
+  res.writeHead(200, {
+    "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream",
+    "Cache-Control": "no-store",
+  });
+  fs.createReadStream(file).pipe(res);
+});
+
+server.on("upgrade", (req, socket) => {
+  if ((req.url || "").split("?")[0] !== "/socket" || req.headers.upgrade?.toLowerCase() !== "websocket") {
+    return socket.destroy();
+  }
+  const key = req.headers["sec-websocket-key"];
+  if (!key) return socket.destroy();
+  const accept = crypto.createHash("sha1")
+    .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+    .digest("base64");
+  socket.write([
+    "HTTP/1.1 101 Switching Protocols",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Accept: ${accept}`,
+    "\r\n",
+  ].join("\r\n"));
+  websocketClient(socket);
+});
+
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    if (room.state === "match" && room.match) room.match.advance(now);
+  }
+}, TICK_MS).unref();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    for (const player of [...room.players.values()]) {
+      if (!player.client && player.disconnectedAt && now - player.disconnectedAt > 20_000) {
+        if (room.state === "match" && room.match && !room.result) room.match.forfeit(player.slot);
+        room.players.delete(player.token);
+      }
+    }
+    if (!room.players.size || now - room.touchedAt > 60 * 60 * 1000) destroyRoom(room);
+    else syncRoom(room);
+  }
+}, 5000).unref();
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Void Limit Online running at http://localhost:${PORT}`);
+  console.log("Share this computer's local IP address and room code with Player 2.");
+});
