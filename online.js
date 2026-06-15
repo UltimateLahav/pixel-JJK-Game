@@ -55,6 +55,7 @@
   const socketUrl = location.protocol === "file:"
     ? "ws://localhost:4173/socket"
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/socket`;
+  const INPUT_LEAD_FRAMES = 3;
 
   const serverNow = () => Date.now() + state.clockOffset;
   const localTime = (serverTimestamp) => Number(serverTimestamp) - state.clockOffset;
@@ -506,9 +507,11 @@
   });
 
   setInterval(() => {
-    if (!state.matchActive || !state.matchStartAt || serverNow() < state.matchStartAt) return;
-    const targetFrame = Math.max(0, Math.floor((serverNow() - state.matchStartAt) / state.tickMs));
-    let budget = 4;
+    if (!state.matchActive || !state.matchStartAt) return;
+    const timeFromStart = serverNow() - state.matchStartAt;
+    if (timeFromStart < -INPUT_LEAD_FRAMES * state.tickMs) return;
+    const targetFrame = Math.max(0, Math.floor(timeFromStart / state.tickMs) + INPUT_LEAD_FRAMES);
+    let budget = 12;
     while (state.lastInputFrame < targetFrame && budget-- > 0) {
       const frame = ++state.lastInputFrame;
       const input = window.VoidLimitOnline?.input?.(frame);
