@@ -52,6 +52,7 @@ function roomView(room) {
         name: p.name,
         ready: p.ready,
         character: p.character,
+        variant: p.variant,
         locked: p.locked,
         connected: Boolean(p.client),
         ping: p.ping,
@@ -133,6 +134,7 @@ function createRoom(client, msg) {
     name: safeName(msg.name),
     ready: false,
     character: null,
+    variant: "normal",
     locked: false,
     ping: 0,
     client,
@@ -174,6 +176,7 @@ function joinRoom(client, msg) {
     name: safeName(msg.name),
     ready: false,
     character: null,
+    variant: "normal",
     locked: false,
     ping: 0,
     client,
@@ -204,6 +207,7 @@ function startAuthoritativeMatch(room, startAt, seed) {
   const players = [...room.players.values()].map((player) => ({
     slot: player.slot,
     character: player.character,
+    variant: player.variant,
   }));
   room.match = new AuthoritativeMatch({
     players,
@@ -265,6 +269,7 @@ function handleRoomMessage(client, msg) {
     for (const p of players) {
       p.stats = null;
       p.character = null;
+      p.variant = "normal";
       p.locked = false;
     }
     broadcast(room, { type: "characterSelect", room: roomView(room) });
@@ -277,6 +282,10 @@ function handleRoomMessage(client, msg) {
     syncRoom(room);
     const players = [...room.players.values()];
     if (players.length === 2 && players.every((p) => p.locked && p.character && p.client)) {
+      for (const p of players) p.variant = "normal";
+      if (players[0].character === players[1].character) {
+        players[crypto.randomInt(2)].variant = "inverted";
+      }
       room.state = "loading";
       room.loaded.clear();
       room.seed = crypto.randomInt(1_000_000_000);
@@ -320,6 +329,7 @@ function handleRoomMessage(client, msg) {
         p.ready = msg.type === "rematch";
         p.stats = null;
         p.character = null;
+        p.variant = "normal";
         p.locked = false;
       }
       broadcast(room, { type: "backToLobby", rematch: msg.type === "rematch" });
