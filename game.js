@@ -389,7 +389,7 @@
       dismantleUses: 0, cleaveUses: 0, sukunaDomainUses: 0, worldSlashUnlocked: false,
       worldSlashUses: 0,
       charging: false, chargeRecovery: 0, chargeCooldown: 0, chargePulse: 0,
-      techniqueCharge: null, moveConfiscation: 0, airRoughCrater: false,
+      techniqueCharge: null, dismantleVolley: null, moveConfiscation: 0, airRoughCrater: false,
       fuga: 0,
     };
   }
@@ -973,7 +973,7 @@
     const p = game.player;
     if (!p || p.techniqueCharge || p.stun > 0 || p.attack || p.charging || p.moveConfiscation > 0) return false;
     if (name !== "red" || !["gojo", "sukuna"].includes(p.character) || p.cooldowns.red > 0) return false;
-    const cost = p.character === "sukuna" ? 32 : 26;
+    const cost = p.character === "sukuna" ? 16 : 26;
     if (p.energy < cost) return false;
     p.techniqueCharge = { name, elapsed: 0, releaseDelay: -1, auto: false };
     p.vx = 0;
@@ -986,6 +986,10 @@
   function releaseChargedTechnique() {
     const p = game.player;
     if (!p?.techniqueCharge || p.techniqueCharge.releaseDelay >= 0) return;
+    if (p.techniqueCharge.elapsed <= .3) {
+      fireQuickTechnique();
+      return;
+    }
     p.techniqueCharge.releaseDelay = .5;
   }
 
@@ -998,6 +1002,105 @@
       announce(p.character === "gojo" ? "RED CHARGE BROKEN -30 CE" : "DISMANTLE INTERRUPTED");
     }
     p.techniqueCharge = null;
+  }
+
+  function dismantleMode(p) {
+    if (p.grounded) return "straight";
+    return p.jumps === 0 ? "autoAim" : "groundSlash";
+  }
+
+  function spawnDismantleSlash(p, e, volley) {
+    const direction = e.x >= p.x ? 1 : -1;
+    const originX = p.x + direction * 55;
+    const originY = p.y - 72;
+    let vx = direction * 760;
+    let vy = 0;
+    let w = 115;
+    let h = 38;
+    let kbY = 110;
+    if (volley.mode === "groundSlash") {
+      vx = 0;
+      vy = 900;
+      w = 38;
+      h = 115;
+      kbY = -330;
+    } else if (volley.mode === "autoAim") {
+      const dx = e.x - originX;
+      const dy = e.y - e.h * .55 - originY;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      vx = dx / distance * 760;
+      vy = dy / distance * 760;
+    }
+    const projectile = {
+      owner: "player", type: "dismantle", x: originX, y: originY,
+      vx, vy, w, h, life: .85,
+      damage: volley.damage, kbX: 330, kbY, strong: false,
+    };
+    game.projectiles.push(projectile);
+    sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+    tone(240, .12, "sawtooth", .22, -170);
+  }
+
+  function queueDismantleVolley(p, e, count, damage) {
+    const volley = {
+      remaining: count,
+      timer: 0,
+      damage,
+      mode: dismantleMode(p),
+    };
+    spawnDismantleSlash(p, e, volley);
+    volley.remaining--;
+    volley.timer = .2;
+    p.dismantleVolley = volley.remaining > 0 ? volley : null;
+  }
+
+  function updateDismantleVolley(dt) {
+    const p = game.player;
+    const volley = p?.dismantleVolley;
+    if (!p || !volley) return;
+    volley.timer -= dt;
+    while (volley.remaining > 0 && volley.timer <= 0) {
+      spawnDismantleSlash(p, game.enemy, volley);
+      volley.remaining--;
+      volley.timer += .2;
+    }
+    if (volley.remaining <= 0) p.dismantleVolley = null;
+  }
+
+  function fireQuickTechnique() {
+    const p = game.player;
+    const e = game.enemy;
+    if (!p?.techniqueCharge) return;
+    p.techniqueCharge = null;
+    p.vx = 0;
+    if (p.character === "gojo") {
+      p.energy -= 26;
+      p.cooldowns.red = characters.gojo.cooldowns.red;
+      p.attack = { name: "Reversal: Red", elapsed: 0, duration: .66, start: .12, end: .34, active: false, hit: new Set(), type: "red" };
+      p.state = "cast";
+      const projectile = {
+        owner: "player", type: "red", x: p.x + p.facing * 55, y: p.y - 80,
+        vx: p.facing * 510, vy: 0, w: 48, h: 48, life: 1.5,
+        damage: 18, kbX: 620, kbY: 240, strong: true,
+      };
+      game.projectiles.push(projectile);
+      sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+      announce("REVERSAL: RED");
+      tone(150, .35, "sawtooth", .3, -100);
+      return;
+    }
+
+    p.energy -= 16;
+    p.cooldowns.red = characters.sukuna.cooldowns.red;
+    p.dismantleUses++;
+    updateWorldSlashUnlock(p);
+    p.attack = {
+      name: "Dismantle", elapsed: 0, duration: .42, start: .08, end: .28,
+      active: false, hit: new Set(), type: "dismantle", specialCancel: true,
+    };
+    p.state = "slash";
+    queueDismantleVolley(p, e, 1, 15);
+    announce(p.grounded ? "DISMANTLE" : p.jumps === 0 ? "AERIAL DISMANTLE: LOCK" : "AERIAL DISMANTLE: GROUND");
   }
 
   function fireChargedTechnique() {
@@ -1026,38 +1129,24 @@
       return;
     }
 
+    if (p.energy < 32) {
+      p.techniqueCharge = charge;
+      fireQuickTechnique();
+      return;
+    }
     p.energy -= 32;
     p.cooldowns.red = characters.sukuna.cooldowns.red;
     p.dismantleUses++;
     updateWorldSlashUnlock(p);
+    const count = 1 + Math.floor(ratio * 5);
+    const damage = 15 * (.8 - ratio * .5);
     p.attack = {
-      name: "Dismantle Barrage", elapsed: 0, duration: .55, start: .08, end: .4,
+      name: "Dismantle Barrage", elapsed: 0, duration: .45 + (count - 1) * .2, start: .08, end: .4 + (count - 1) * .2,
       active: false, hit: new Set(), type: "dismantle", specialCancel: true,
     };
     p.state = "slash";
-    const count = 1 + Math.floor(ratio * 5);
-    const damage = 15 * (.8 - ratio * .5);
-    const doubleJump = !p.grounded && p.jumps === 0;
-    const singleJump = !p.grounded && !doubleJump;
-    for (let i = 0; i < count; i++) {
-      const targetX = doubleJump ? e.x : p.x + p.facing * (70 + i * 26);
-      const targetY = doubleJump ? e.y - e.h * .55 : singleJump ? GROUND - 10 : p.y - 72 + (i % 2 ? 18 : -12);
-      const dx = targetX - (p.x + p.facing * 55);
-      const dy = targetY - (p.y - 72);
-      const distance = Math.max(1, Math.hypot(dx, dy));
-      const projectile = {
-        owner: "player", type: "dismantle",
-        x: p.x + p.facing * 55, y: p.y - 72,
-        vx: singleJump ? 0 : dx / distance * 760,
-        vy: singleJump ? 900 : dy / distance * 760,
-        w: 105, h: 32, life: .85 + i * .04,
-        damage, kbX: 260, kbY: singleJump ? -330 : 90, strong: false,
-      };
-      game.projectiles.push(projectile);
-      sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
-    }
+    queueDismantleVolley(p, e, count, damage);
     announce(`${count} DISMANTLE SLASH${count > 1 ? "ES" : ""}`);
-    tone(240, .16, "sawtooth", .26, -170);
   }
 
   function startFuga() {
@@ -2142,6 +2231,7 @@
         p.techniqueCharge.releaseDelay = .5;
       }
     }
+    updateDismantleVolley(dt);
     if (p.fuga) {
       p.fuga.timer -= dt;
       p.vx = 0;
@@ -3617,12 +3707,16 @@
 
     const burned = Boolean(entity.burned);
     const inverted = entity.onlineVariant === "inverted";
-    const dark = tint || (burned ? (inverted ? "#62646c" : "#11090b") : inverted ? "#e8edf4" : "#171018");
-    const cloth = tint || (burned ? (inverted ? "#b9b5af" : "#382b28") : inverted ? "#242c39" : "#e5ddd2");
-    const red = tint || (burned ? (inverted ? "#3f6a83" : "#61202a") : inverted ? "#2a8eb6" : "#8e1835");
+    const dark = tint || (burned ? (inverted ? "#62646c" : "#11090b") : inverted ? "#edf1f6" : "#15131b");
+    const cloth = tint || (burned ? (inverted ? "#b9b5af" : "#382b28") : inverted ? "#242c39" : "#eee6d8");
+    const clothShadow = tint || (burned ? (inverted ? "#8e8a87" : "#241a19") : inverted ? "#425064" : "#c9bcad");
+    const inner = tint || (burned ? (inverted ? "#d0d2d7" : "#100d12") : inverted ? "#dde5ef" : "#24202c");
+    const red = tint || (burned ? (inverted ? "#3f6a83" : "#61202a") : inverted ? "#238bad" : "#8e1835");
     const energy = tint || (burned ? (inverted ? "#65cfff" : "#ff6a32") : inverted ? "#48dfff" : "#ff244f");
-    const skin = tint || (burned ? (inverted ? "#aaa09d" : "#6f3c34") : inverted ? "#79aeb8" : "#d5a199");
-    const hair = tint || (burned ? (inverted ? "#d7dce2" : "#4a3230") : inverted ? "#274857" : "#e8b7bd");
+    const skin = tint || (burned ? (inverted ? "#aaa09d" : "#6f3c34") : inverted ? "#6ca7b5" : "#d7a08f");
+    const hair = tint || (burned ? (inverted ? "#d7dce2" : "#4a3230") : inverted ? "#245264" : "#ef9eae");
+    const hairShadow = tint || (burned ? (inverted ? "#abaeb5" : "#302020") : inverted ? "#173945" : "#c96f83");
+    const mark = tint || (burned ? (inverted ? "#d9d9dc" : "#090609") : inverted ? "#edf5f8" : "#28050e");
     let legA = run * 10;
     let legB = -run * 10;
     if (!entity.grounded) { legA = 9; legB = -8; }
@@ -3633,11 +3727,14 @@
     pixelRect(4 + legB, -39, 14, 32, dark);
     pixelRect(-20 + legA, -9, 19, 9, tint || "#09070b");
     pixelRect(1 + legB, -9, 20, 9, tint || "#09070b");
-    pixelRect(-21, -78, 42, 43, cloth);
-    pixelRect(-18, -75, 36, 37, tint || "#d4c9bf");
-    pixelRect(-21, -76, 7, 39, red);
-    pixelRect(-5, -72, 5, 33, tint || "#b92d49");
-    pixelRect(-18, -44, 36, 7, dark);
+    pixelRect(-24, -80, 48, 44, cloth);
+    pixelRect(-19, -76, 38, 39, clothShadow);
+    pixelRect(-10, -78, 20, 39, inner);
+    pixelRect(-17, -76, 10, 29, cloth);
+    pixelRect(7, -76, 10, 29, cloth);
+    pixelRect(-5, -77, 10, 32, red);
+    pixelRect(-21, -47, 42, 10, dark);
+    pixelRect(-18, -46, 36, 4, red);
 
     let frontX = 15;
     let frontY = -70;
@@ -3661,24 +3758,33 @@
       frontX -= run * 8;
       backX += run * 8;
     }
-    pixelRect(backX, backY, 11, 32, cloth);
+    pixelRect(backX, backY, 12, 33, cloth);
+    pixelRect(backX + 1, backY + 21, 11, 7, clothShadow);
     pixelRect(backX + 1, backY + 26, 10, 9, skin);
-    pixelRect(frontX, frontY, 11, 32, red);
+    pixelRect(frontX, frontY, 12, 33, cloth);
+    pixelRect(frontX + 1, frontY + 21, 11, 7, red);
     pixelRect(frontX + 1, frontY + 26, 10, 9, skin);
 
     pixelRect(-16, -105, 32, 31, skin);
-    pixelRect(-17, -99, 5, 21, red);
-    pixelRect(-17, -111, 7, 16, hair);
-    pixelRect(-11, -115, 8, 20, hair);
-    pixelRect(-4, -118, 8, 22, hair);
-    pixelRect(4, -115, 8, 20, hair);
-    pixelRect(11, -111, 7, 16, hair);
-    pixelRect(-13, -99, 10, 4, tint || "#28050e");
-    pixelRect(4, -99, 10, 4, tint || "#28050e");
-    pixelRect(-9, -88, 18, 4, tint || "#501020");
-    pixelRect(-15, -91, 7, 3, tint || "#7d1730");
-    pixelRect(8, -91, 7, 3, tint || "#7d1730");
-    pixelRect(-3, -105, 3, 28, tint || "#68162c");
+    pixelRect(-18, -108, 7, 17, hairShadow);
+    pixelRect(-16, -114, 8, 21, hair);
+    pixelRect(-10, -119, 9, 25, hair);
+    pixelRect(-3, -122, 9, 28, hair);
+    pixelRect(5, -119, 9, 25, hair);
+    pixelRect(12, -114, 8, 21, hair);
+    pixelRect(-18, -104, 5, 13, hairShadow);
+    pixelRect(-13, -100, 10, 4, mark);
+    pixelRect(4, -100, 10, 4, mark);
+    pixelRect(-10, -108, 4, 7, mark);
+    pixelRect(6, -108, 4, 7, mark);
+    pixelRect(-4, -105, 3, 10, mark);
+    pixelRect(1, -105, 3, 10, mark);
+    pixelRect(-16, -92, 8, 3, mark);
+    pixelRect(8, -92, 8, 3, mark);
+    pixelRect(-14, -87, 7, 3, mark);
+    pixelRect(7, -87, 7, 3, mark);
+    pixelRect(-8, -82, 16, 4, mark);
+    pixelRect(-3, -97, 3, 18, mark);
     if (burned && !tint) {
       pixelRect(-12, -103, 6, 10, inverted ? "#29495c" : "#090506");
       pixelRect(7, -73, 8, 14, inverted ? "#3e758e" : "#35100f");
@@ -3759,12 +3865,15 @@
     }
     const burned = Boolean(entity.burned);
     const inverted = entity.onlineVariant === "inverted";
-    const dark = tint || (burned ? (inverted ? "#666769" : "#0b110d") : inverted ? "#ebe6f0" : "#171019");
-    const coat = tint || (burned ? (inverted ? "#8d807a" : "#263429") : inverted ? "#b9e898" : "#4c1767");
-    const coatEdge = tint || (burned ? (inverted ? "#d56f9f" : "#57634a") : inverted ? "#67d7ad" : "#7e2aa5");
-    const shirt = tint || (burned ? (inverted ? "#b9b9b0" : "#131813") : inverted ? "#e8dbf0" : "#101a15");
+    const dark = tint || (burned ? (inverted ? "#666769" : "#0b110d") : inverted ? "#ebe6f0" : "#16151d");
+    const coat = tint || (burned ? (inverted ? "#8d807a" : "#263429") : inverted ? "#d5c6a1" : "#302448");
+    const coatEdge = tint || (burned ? (inverted ? "#d56f9f" : "#57634a") : inverted ? "#a7864f" : "#57426e");
+    const shirt = tint || (burned ? (inverted ? "#b9b9b0" : "#131813") : inverted ? "#282532" : "#e7e0d5");
     const skin = tint || (burned ? (inverted ? "#b2a199" : "#714733") : inverted ? "#77a997" : "#bd856f");
-    const hair = tint || (burned ? (inverted ? "#d5d0cd" : "#211a18") : inverted ? "#b9e5d2" : "#3b172f");
+    const hair = tint || (burned ? (inverted ? "#d5d0cd" : "#211a18") : inverted ? "#3f3453" : "#d8c080");
+    const hairShadow = tint || (burned ? (inverted ? "#aba7a2" : "#171311") : inverted ? "#271e39" : "#a78a4f");
+    const brow = tint || (burned ? (inverted ? "#ddd7d1" : "#080706") : inverted ? "#ebe3d3" : "#241a1c");
+    const gold = tint || (burned ? (inverted ? "#62577b" : "#4b4121") : inverted ? "#574178" : "#d6ab45");
     const energy = tint || (burned ? (inverted ? "#ff78b5" : "#95a84d") : inverted ? "#d43b9c" : "#55f087");
     let legA = run * 10;
     let legB = -run * 10;
@@ -3774,9 +3883,13 @@
     pixelRect(4 + legB, -40, 14, 33, dark);
     pixelRect(-20 + legA, -9, 19, 9, "#09070b");
     pixelRect(1 + legB, -9, 20, 9, "#09070b");
-    pixelRect(-22, -80, 44, 45, coat);
-    pixelRect(-16, -76, 32, 39, shirt);
-    pixelRect(-22, -78, 6, 40, coatEdge);
+    pixelRect(-25, -81, 50, 46, coat);
+    pixelRect(-17, -77, 34, 40, shirt);
+    pixelRect(-25, -78, 8, 40, coatEdge);
+    pixelRect(17, -78, 8, 40, coatEdge);
+    pixelRect(-17, -77, 8, 34, coat);
+    pixelRect(9, -77, 8, 34, coat);
+    pixelRect(-3, -74, 6, 25, gold);
     pixelRect(-17, -44, 34, 7, dark);
     let frontX = 15, frontY = -71, backX = -24, backY = -71;
     if (entity.attack) {
@@ -3789,19 +3902,26 @@
       frontX -= run * 8;
       backX += run * 8;
     }
-    pixelRect(backX, backY, 11, 32, coat);
+    pixelRect(backX, backY, 13, 33, coat);
+    pixelRect(backX + 1, backY + 21, 12, 7, coatEdge);
     pixelRect(backX + 1, backY + 26, 10, 9, skin);
-    pixelRect(frontX, frontY, 11, 32, coatEdge);
+    pixelRect(frontX, frontY, 13, 33, coat);
+    pixelRect(frontX + 1, frontY + 21, 12, 7, coatEdge);
     pixelRect(frontX + 1, frontY + 26, 10, 9, skin);
     pixelRect(-16, -106, 32, 32, skin);
-    pixelRect(-18, -113, 8, 20, hair);
-    pixelRect(-12, -119, 9, 25, hair);
-    pixelRect(-4, -121, 9, 27, hair);
-    pixelRect(5, -117, 9, 23, hair);
-    pixelRect(12, -111, 7, 18, hair);
-    pixelRect(-12, -99, 10, 4, "#16080d");
-    pixelRect(4, -99, 10, 4, "#16080d");
-    pixelRect(-8, -86, 17, 4, "#672f34");
+    pixelRect(-19, -111, 8, 17, hairShadow);
+    pixelRect(-17, -116, 9, 21, hair);
+    pixelRect(-11, -121, 10, 27, hair);
+    pixelRect(-4, -124, 11, 30, hair);
+    pixelRect(5, -122, 11, 28, hair);
+    pixelRect(13, -117, 9, 23, hair);
+    pixelRect(17, -112, 7, 17, hairShadow);
+    pixelRect(-11, -100, 9, 4, brow);
+    pixelRect(4, -100, 11, 4, brow);
+    pixelRect(-10, -96, 7, 3, tint || "#e7d8b5");
+    pixelRect(6, -96, 7, 3, tint || "#e7d8b5");
+    pixelRect(-8, -86, 17, 4, tint || "#6b3432");
+    pixelRect(12, -90, 3, 8, gold);
     if (burned && !tint) {
       pixelRect(-13, -104, 7, 11, inverted ? "#59404d" : "#080907");
       pixelRect(5, -71, 8, 13, inverted ? "#a34972" : "#313a20");
