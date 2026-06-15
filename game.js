@@ -143,6 +143,7 @@
     realityCrack: 0,
     domainCharacter: "gojo",
     domainTick: .5,
+    domainPrevious: 0,
     hakariDomain: null,
     jackpotFlash: 0,
     online: {
@@ -171,7 +172,7 @@
       correctionY: 0,
       inputEdges: {
         jump: false, dash: false, light: false, heavy: false,
-        special: "", domain: false, awaken: false,
+        special: "", specialRelease: "", fuga: false, domain: false, awaken: false,
       },
       stats: { damage: 0, parries: 0, blackFlashes: 0, domains: 0 },
     },
@@ -191,7 +192,7 @@
         ["T", "UNLIMITED VOID"],
       ],
       labels: { red: "RED", blue: "BLUE", purple: "PURPLE", domain: "DOMAIN" },
-      costs: { blue: 18, red: 26, purple: 82, domain: 100 },
+      costs: { blue: 18, red: 26, purple: 82, domain: 0 },
       cooldowns: { blue: 4.5, red: 6.2, purple: 13, domain: 24 },
     },
     sukuna: {
@@ -207,7 +208,7 @@
         ["T", "MALEVOLENT SHRINE"],
       ],
       labels: { red: "DISMANTLE", blue: "CLEAVE", purple: "WORLD SLASH", domain: "SHRINE" },
-      costs: { blue: 22, red: 16, purple: 95, domain: 100 },
+      costs: { blue: 22, red: 16, purple: 95, domain: 0 },
       cooldowns: { blue: 5.2, red: 3.4, purple: 15, domain: 24 },
     },
     hakari: {
@@ -225,7 +226,7 @@
       ],
       labels: { red: "ROUGH PUNCH", blue: "SHUTTER", purple: "RESERVE BALLS", domain: "GAMBLE" },
       costs: { blue: 20, red: 16, purple: 14, domain: 100 },
-      cooldowns: { blue: 5.5, red: 3.8, purple: 2.8, domain: 25 },
+      cooldowns: { blue: 5.5, red: 3.8, purple: 4.2, domain: 25 },
     },
   };
 
@@ -386,7 +387,10 @@
       rewindWindow: 0, rewindX: 0, rewindY: 0, rewindHealth: 600,
       jackpotFinisher: false,
       dismantleUses: 0, cleaveUses: 0, sukunaDomainUses: 0, worldSlashUnlocked: false,
+      worldSlashUses: 0,
       charging: false, chargeRecovery: 0, chargeCooldown: 0, chargePulse: 0,
+      techniqueCharge: null, moveConfiscation: 0, airRoughCrater: false,
+      fuga: 0,
     };
   }
 
@@ -667,9 +671,10 @@
     game.online.correctionY = 0;
     game.domainOwnerSlot = 0;
     game.domainStartup = 0;
+    game.domainPrevious = 0;
     game.online.inputEdges = {
       jump: false, dash: false, light: false, heavy: false,
-      special: "", domain: false, awaken: false,
+      special: "", specialRelease: "", fuga: false, domain: false, awaken: false,
     };
     game.online.stats = { damage: 0, parries: 0, blackFlashes: 0, domains: 0 };
     game.time = Number(options.time) || 99;
@@ -775,7 +780,7 @@
 
   function playerAttack(type) {
     const p = game.player;
-    if (!p || p.stun > 0 || p.charging || p.chargeRecovery > 0 || game.cinematic > 0 || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.charging || p.techniqueCharge || p.chargeRecovery > 0 || game.cinematic > 0 || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
     if (type === "heavy" && attemptBlackFlash()) return;
     if (p.attack) {
       if (type === "light" && p.attack.chain) {
@@ -875,7 +880,7 @@
 
   function shortDash() {
     const p = game.player;
-    if (!p || p.stun > 0 || p.charging || p.chargeRecovery > 0 || p.dashCooldown > 0 || game.cinematic > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.charging || p.techniqueCharge || p.chargeRecovery > 0 || p.dashCooldown > 0 || game.cinematic > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
     const canCancel = p.attack?.hitConfirmed && p.attack.dashCancel && p.attack.elapsed >= p.attack.start;
     if (p.attack && !canCancel) return;
     if (!p.grounded && !p.airDash) return;
@@ -954,7 +959,7 @@
 
   function updateWorldSlashUnlock(p) {
     if (!p || p.character !== "sukuna") return false;
-    const unlocked = p.dismantleUses >= 10 && p.cleaveUses >= 5 && p.sukunaDomainUses >= 1;
+    const unlocked = p.dismantleUses >= 5 && p.cleaveUses >= 2 && p.sukunaDomainUses >= 1;
     if (unlocked && !p.worldSlashUnlocked) {
       p.worldSlashUnlocked = true;
       announce("WORLD-CUTTING SLASH UNLOCKED");
@@ -962,6 +967,119 @@
       tone(52, .65, "sawtooth", .3, 220);
     }
     return p.worldSlashUnlocked;
+  }
+
+  function beginChargedTechnique(name) {
+    const p = game.player;
+    if (!p || p.techniqueCharge || p.stun > 0 || p.attack || p.charging || p.moveConfiscation > 0) return false;
+    if (name !== "red" || !["gojo", "sukuna"].includes(p.character) || p.cooldowns.red > 0) return false;
+    const cost = p.character === "sukuna" ? 32 : 26;
+    if (p.energy < cost) return false;
+    p.techniqueCharge = { name, elapsed: 0, releaseDelay: -1, auto: false };
+    p.vx = 0;
+    p.state = p.character === "sukuna" ? "dismantleCharge" : "redCharge";
+    p.blocking = false;
+    announce(p.character === "sukuna" ? "DISMANTLE CHARGE" : "REVERSAL: RED CHARGE");
+    return true;
+  }
+
+  function releaseChargedTechnique() {
+    const p = game.player;
+    if (!p?.techniqueCharge || p.techniqueCharge.releaseDelay >= 0) return;
+    p.techniqueCharge.releaseDelay = .5;
+  }
+
+  function cancelChargedTechnique(interrupted = false) {
+    const p = game.player;
+    if (!p?.techniqueCharge) return;
+    if (interrupted) {
+      if (p.character === "gojo") p.energy = Math.max(0, p.energy - 30);
+      if (p.character === "sukuna") p.cooldowns.red = Math.max(p.cooldowns.red, characters.sukuna.cooldowns.red * .5);
+      announce(p.character === "gojo" ? "RED CHARGE BROKEN -30 CE" : "DISMANTLE INTERRUPTED");
+    }
+    p.techniqueCharge = null;
+  }
+
+  function fireChargedTechnique() {
+    const p = game.player;
+    const e = game.enemy;
+    const charge = p?.techniqueCharge;
+    if (!p || !charge) return;
+    const ratio = clamp(charge.elapsed / 5, 0, 1);
+    p.techniqueCharge = null;
+    p.vx = 0;
+    if (p.character === "gojo") {
+      p.energy -= 26;
+      p.cooldowns.red = characters.gojo.cooldowns.red;
+      p.attack = { name: "Charged Reversal: Red", elapsed: 0, duration: .58, start: .18, end: .34, active: false, hit: new Set(), type: "red" };
+      p.state = "cast";
+      const size = 46 - ratio * 20;
+      const projectile = {
+        owner: "player", type: "red", x: p.x + p.facing * 52, y: p.y - 80,
+        vx: p.facing * (510 + ratio * 620), vy: 0, w: size, h: size, life: 1.5,
+        damage: 18 + ratio * 18, kbX: 620 + ratio * 180, kbY: 240, strong: true,
+      };
+      game.projectiles.push(projectile);
+      sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+      announce(`RED RELEASE ${charge.elapsed.toFixed(1)}s`);
+      tone(150, .35, "sawtooth", .3, 160);
+      return;
+    }
+
+    p.energy -= 32;
+    p.cooldowns.red = characters.sukuna.cooldowns.red;
+    p.dismantleUses++;
+    updateWorldSlashUnlock(p);
+    p.attack = {
+      name: "Dismantle Barrage", elapsed: 0, duration: .55, start: .08, end: .4,
+      active: false, hit: new Set(), type: "dismantle", specialCancel: true,
+    };
+    p.state = "slash";
+    const count = 1 + Math.floor(ratio * 5);
+    const damage = 15 * (.8 - ratio * .5);
+    const doubleJump = !p.grounded && p.jumps === 0;
+    const singleJump = !p.grounded && !doubleJump;
+    for (let i = 0; i < count; i++) {
+      const targetX = doubleJump ? e.x : p.x + p.facing * (70 + i * 26);
+      const targetY = doubleJump ? e.y - e.h * .55 : singleJump ? GROUND - 10 : p.y - 72 + (i % 2 ? 18 : -12);
+      const dx = targetX - (p.x + p.facing * 55);
+      const dy = targetY - (p.y - 72);
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const projectile = {
+        owner: "player", type: "dismantle",
+        x: p.x + p.facing * 55, y: p.y - 72,
+        vx: singleJump ? 0 : dx / distance * 760,
+        vy: singleJump ? 900 : dy / distance * 760,
+        w: 105, h: 32, life: .85 + i * .04,
+        damage, kbX: 260, kbY: singleJump ? -330 : 90, strong: false,
+      };
+      game.projectiles.push(projectile);
+      sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+    }
+    announce(`${count} DISMANTLE SLASH${count > 1 ? "ES" : ""}`);
+    tone(240, .16, "sawtooth", .26, -170);
+  }
+
+  function startFuga() {
+    const p = game.player;
+    if (!p || p.character !== "sukuna" || p.energy < 70 || p.cooldowns.red > 0 || p.cooldowns.blue > 0
+      || p.stun > 0 || p.attack || p.moveConfiscation > 0) return false;
+    cancelChargedTechnique();
+    p.energy -= 70;
+    p.cooldowns.red = Math.max(p.cooldowns.red, 12);
+    p.cooldowns.blue = Math.max(p.cooldowns.blue, 12);
+    p.attack = {
+      name: "Fuga", elapsed: 0, duration: 2.65, start: 1.65, end: 2.25,
+      active: false, hit: new Set(), type: "fuga", specialCancel: false,
+    };
+    p.fuga = { timer: 2.65, fired: false };
+    p.invuln = 2.65;
+    p.vx = 0;
+    p.state = "fuga";
+    game.cinematic = .55;
+    game.cameraTarget = 1.2;
+    announce("FUGA");
+    return true;
   }
 
   function abilityTuning(p, name) {
@@ -977,9 +1095,11 @@
 
   function useAbility(name) {
     const p = game.player;
+    const e = game.enemy;
     const profile = characterProfile(p);
     const domainResponse = game.online.active && name === "domain" && game.online.remoteDomainWindow > 0;
-    if (!p || p.stun > 0 || p.charging || p.chargeRecovery > 0 || (game.cinematic > 0 && !domainResponse) || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.charging || p.techniqueCharge || p.chargeRecovery > 0 || p.moveConfiscation > 0
+      || (game.cinematic > 0 && !domainResponse) || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
     if (p.character === "gojo" && name === "purple") {
       if (!game.unstablePurple || game.unstablePurple.state !== "unstable") return;
       stabilizeHollowPurple();
@@ -987,13 +1107,17 @@
     }
     if (p.character === "gojo" && p.burnout > 0 && (name === "blue" || name === "red" || name === "domain")) return;
     if (p.character === "sukuna" && name === "purple" && !updateWorldSlashUnlock(p)) {
-      announce(`WORLD SLASH LOCKED ${p.dismantleUses}/10 D  ${p.cleaveUses}/5 C  ${p.sukunaDomainUses}/1 DOMAIN`);
+      announce(`WORLD SLASH LOCKED ${p.dismantleUses}/5 D  ${p.cleaveUses}/2 C  ${p.sukunaDomainUses}/1 DOMAIN`);
       tone(70, .08, "square", .14, -30);
       return;
     }
     const canSpecialCancel = p.attack?.hitConfirmed && p.attack.specialCancel && p.attack.elapsed >= p.attack.start;
     if (p.attack && !canSpecialCancel) return;
     const tuning = abilityTuning(p, name);
+    if (p.character === "sukuna" && name === "purple" && p.worldSlashUses >= 2) {
+      announce("WORLD SLASH EXHAUSTED 2/2");
+      return;
+    }
     const jackpotFinisherMove = p.character === "hakari" && p.jackpot > 0 && (name === "blue" || name === "purple");
     if (p.cooldowns[name] > 0 || ((!p.jackpot || jackpotFinisherMove) && p.energy < tuning.cost)) {
       tone(70, .06, "square", .12, -20);
@@ -1015,6 +1139,31 @@
     } else if (p.character === "sukuna") {
       useSukunaTechnique(name);
     } else if (name === "blue") {
+      if (!p.grounded && p.jumps === 0) {
+        p.attack = {
+          name: "Blue Skyfall", elapsed: 0, duration: .82, start: .14, end: .58,
+          active: false, hit: new Set(), type: "blueSkyfall", specialCancel: false,
+        };
+        p.state = "blueSkyfall";
+        e.x = lerp(e.x, p.x, .78);
+        e.y = Math.min(e.y, p.y + 35);
+        e.vx = 0;
+        e.vy = 840;
+        e.grounded = false;
+        e.stun = Math.max(e.stun, .72);
+        setTimeout(() => {
+          if (game.state !== "playing") return;
+          applyHit(p, e, {
+            name: "Blue Skyfall Kick", type: "special", damage: 24,
+            kbX: 70, kbY: -920, strong: true, downslam: true,
+            reaction: "slam", color: "#4e8fff",
+          });
+          spawnShockwave(e.x, GROUND - 4, "#4e8fff");
+          spawnParticles(e.x, GROUND - 8, "#65758d", 34, 430, 10, .85);
+        }, 360);
+        announce("BLUE SKYFALL");
+        return;
+      }
       p.attack = { name: "Lapse: Blue", elapsed: 0, duration: .58, start: .22, end: .36, active: false, hit: new Set(), type: "blue" };
       p.vx = 0;
       p.dashTime = 0;
@@ -1087,18 +1236,24 @@
       p.cleaveUses++;
       updateWorldSlashUnlock(p);
       const weakened = 1 - clamp(e.health / e.maxHealth, 0, 1);
+      const enhanced = p.energy + characters.sukuna.costs.blue > 50;
       p.attack = {
-        name: "Cleave", elapsed: 0, duration: .48, start: .16, end: .31,
+        name: enhanced ? "Maximum Output: Cleave" : "Cleave", elapsed: 0, duration: enhanced ? .62 : .48, start: .16, end: enhanced ? .4 : .31,
         active: false, hit: new Set(), type: "cleave", specialCancel: true,
-        range: 104, h: 82, y: -88, damage: 15 + weakened * 13,
+        range: enhanced ? 148 : 104, h: enhanced ? 104 : 82, y: -88, damage: (15 + weakened * 13) * (enhanced ? 1.65 : 1),
         kbX: 310, kbY: 170, reaction: "slash", color: "#ff244f", strong: weakened > .45, slash: true,
       };
+      if (enhanced) {
+        p.cooldowns.blue = 10;
+        announce("MAXIMUM OUTPUT: CLEAVE");
+      }
       p.state = "slash";
       tone(105, .2, "sawtooth", .25, 220);
     } else if (name === "purple") {
+      p.worldSlashUses++;
       p.attack = {
         name: "World Slash", elapsed: 0, duration: .82, start: .34, end: .52,
-        active: false, hit: new Set(), type: "worldSlash", specialCancel: false,
+        active: false, hit: new Set(), type: "worldSlash", specialCancel: false, damage: 200,
       };
       p.state = "worldSlash";
       game.cinematic = .36;
@@ -1109,7 +1264,7 @@
         const projectile = {
           owner: "player", type: "worldSlash", x: p.x + p.facing * 120, y: p.y - 84,
           vx: p.facing * 920, vy: 0, w: 285, h: 112, life: .9,
-          damage: p.awakening > 0 ? 144 : 117, kbX: 760, kbY: 240, strong: true, erasing: true,
+          damage: 200, kbX: 760, kbY: 240, strong: true, erasing: true,
         };
         game.projectiles.push(projectile);
         sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
@@ -1144,6 +1299,38 @@
   function useHakariTechnique(name) {
     const p = game.player;
     if (name === "red") {
+      const doorIndex = game.projectiles.findIndex((projectile) =>
+        projectile.owner === "player" && projectile.type === "door" && Math.abs(projectile.x - p.x) < 190
+      );
+      if (doorIndex >= 0) {
+        const door = game.projectiles.splice(doorIndex, 1)[0];
+        const projectile = {
+          owner: "player", type: "door", rarity: door.rarity,
+          x: door.x, y: door.y, vx: p.facing * 760, vy: -40,
+          w: 54, h: 118, life: 1.25, damage: 34,
+          kbX: 580, kbY: 190, strong: true, launchedDoor: true,
+        };
+        game.projectiles.push(projectile);
+        p.cooldowns.red = Math.max(p.cooldowns.red, 8);
+        p.cooldowns.blue = Math.max(p.cooldowns.blue, 10);
+        p.attack = { name: "Shutter Breaker", elapsed: 0, duration: .56, start: .12, end: .34, active: false, hit: new Set(), type: "roughPunch" };
+        p.state = "roughPunch";
+        announce("SHUTTER BREAKER");
+        return;
+      }
+      if (!p.grounded) {
+        p.attack = {
+          name: "Rough Downkick", elapsed: 0, duration: .62, start: .12, end: .5,
+          active: false, hit: new Set(), type: "roughPunch", specialCancel: false,
+          range: 72, h: 90, y: -32, damage: 24, kbX: 60, kbY: -820,
+          reaction: "slam", color: "#55f087", strong: true, rough: true, downslam: true,
+        };
+        p.vy = 900;
+        p.airRoughCrater = true;
+        p.state = "roughDownkick";
+        announce("ROUGH DOWNKICK");
+        return;
+      }
       p.attack = {
         name: "Rough Cursed Punch", elapsed: 0, duration: p.jackpot > 0 ? .3 : .44,
         start: p.jackpot > 0 ? .08 : .14, end: p.jackpot > 0 ? .2 : .3,
@@ -1219,7 +1406,7 @@
           owner: "player", type: "reserveBall", rarity,
           x: p.x + p.facing * 44, y: p.y - 72 - i * 8,
           vx: p.facing * (520 + i * 45), vy: -140 + i * 55,
-          w: 20, h: 20, life: 2.4, damage: 7.2, kbX: 130, kbY: 45,
+          w: 20, h: 20, life: 2.4, damage: 30, kbX: 210, kbY: 85,
           bounces: 2, strong: false,
         };
         game.projectiles.push(projectile);
@@ -1659,6 +1846,7 @@
     const isPlayerDefending = defender.kind === "player";
     const p = game.player;
     const now = performance.now();
+    if (isPlayerDefending && p.techniqueCharge) cancelChargedTechnique(true);
     if (isPlayerDefending && p.charging) stopEnergyCharge(true);
 
     if (isPlayerDefending && p.blocking && p.grounded) {
@@ -1940,6 +2128,39 @@
     p.chargeCooldown = Math.max(0, p.chargeCooldown - dt);
     p.chargeRecovery = Math.max(0, p.chargeRecovery - dt);
     p.chargePulse = Math.max(0, p.chargePulse - dt);
+    p.moveConfiscation = Math.max(0, p.moveConfiscation - dt);
+    if (p.techniqueCharge) {
+      p.techniqueCharge.elapsed = Math.min(5, p.techniqueCharge.elapsed + dt);
+      p.vx = 0;
+      p.blocking = false;
+      p.state = p.character === "sukuna" ? "dismantleCharge" : "redCharge";
+      if (p.techniqueCharge.releaseDelay >= 0) {
+        p.techniqueCharge.releaseDelay -= dt;
+        if (p.techniqueCharge.releaseDelay <= 0) fireChargedTechnique();
+      } else if (p.techniqueCharge.elapsed >= 5) {
+        p.techniqueCharge.auto = true;
+        p.techniqueCharge.releaseDelay = .5;
+      }
+    }
+    if (p.fuga) {
+      p.fuga.timer -= dt;
+      p.vx = 0;
+      if (!p.fuga.fired && p.fuga.timer <= 1.05) {
+        p.fuga.fired = true;
+        const projectile = {
+          owner: "player", type: "fuga", x: p.x + p.facing * 62, y: p.y - 76,
+          vx: p.facing * 820, vy: 0, w: 82, h: 52, life: 1.4,
+          damage: 90, kbX: 760, kbY: 320, strong: true, erasing: true, burns: true,
+        };
+        game.projectiles.push(projectile);
+        sendOnline("event", { kind: "projectile", projectile: { ...projectile, owner: undefined } });
+        game.shake = 18;
+        game.flash = .22;
+        spawnParticles(projectile.x, projectile.y, "#ff7a25", 55, 620, 11, 1);
+        announce("OPEN");
+      }
+      if (p.fuga.timer <= 0) p.fuga = null;
+    }
     if (p.charging && !keys.has("c")) stopEnergyCharge();
     const canStartCharge = pressed.has("c") && p.chargeCooldown <= 0 && p.chargeRecovery <= 0
       && p.stun <= 0 && !p.attack && !p.blocking && game.cinematic <= 0;
@@ -1974,9 +2195,16 @@
       : p.health <= p.maxHealth * .6 && p.energy >= 50);
     for (const name of Object.keys(p.cooldowns)) p.cooldowns[name] = Math.max(0, p.cooldowns[name] - dt);
     const aggressionRegen = p.character === "sukuna" ? p.pressure * (p.awakening > 0 ? 1.7 : 1.05) : 0;
-    const regenRate = (1.05 + (p.regenBoost > 0 ? 2.1 : 0) + (p.damageRegen > 0 ? 1.6 : 0) + (game.domain > 0 ? 1.7 : 0) + aggressionRegen)
+    const drainingOwnedDomain = game.domain > 0 && game.domainOwnerSlot === (game.online.active ? game.online.slot : 1)
+      && (!game.online.active || !game.online.authoritative) && ["gojo", "sukuna"].includes(game.domainCharacter);
+    if (drainingOwnedDomain) {
+      const drain = game.domainCharacter === "gojo" ? 20 : 10;
+      p.energy = Math.max(0, p.energy - dt * drain);
+      if (p.energy <= 0) game.domain = 0;
+    }
+    const regenRate = (1.05 + (p.regenBoost > 0 ? 2.1 : 0) + (p.damageRegen > 0 ? 1.6 : 0) + aggressionRegen)
       * (p.burnout > 0 ? .28 : 1);
-    p.energy = Math.min(100, p.energy + dt * regenRate);
+    if (!drainingOwnedDomain) p.energy = Math.min(100, p.energy + dt * regenRate);
     if (p.burnout > 0 && p.burnoutSmoke <= 0) {
       p.burnoutSmoke = .09;
       game.particles.push({
@@ -1987,10 +2215,10 @@
       });
     }
 
-    if (p.stun <= 0 && p.dashTime > 0 && !p.attack && !p.charging && game.cinematic <= 0) {
+    if (p.stun <= 0 && p.dashTime > 0 && !p.attack && !p.charging && !p.techniqueCharge && game.cinematic <= 0) {
       p.blocking = false;
       p.state = "dash";
-    } else if (p.stun <= 0 && !p.attack && !p.charging && p.chargeRecovery <= 0 && game.cinematic <= 0) {
+    } else if (p.stun <= 0 && !p.attack && !p.charging && !p.techniqueCharge && p.chargeRecovery <= 0 && game.cinematic <= 0) {
       const move = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
       const speed = (p.jackpot > 0 ? 402 : p.awakening > 0 ? (p.character === "sukuna" ? 385 : 360) : p.character === "sukuna" ? 312 : p.character === "hakari" ? 318 : 295) * (p.burnout > 0 ? .58 : 1);
       if (move) {
@@ -2061,6 +2289,12 @@
       p.jumps = 1;
       p.recoveryUsed = false;
       p.fastFalling = false;
+      if (p.airRoughCrater) {
+        p.airRoughCrater = false;
+        game.shake = 16;
+        spawnShockwave(p.x, GROUND - 4, "#55f087");
+        spawnParticles(p.x, GROUND - 8, "#65705f", 38, 440, 10, .85);
+      }
     } else {
       p.grounded = false;
       if (!p.attack && !p.wall) p.state = "jump";
@@ -2082,10 +2316,11 @@
       game.domainTick -= dt;
       if (game.domainTick <= 0) {
         game.domainTick += .5;
-        e.health = Math.max(0, e.health - 15);
+        const slashDamage = e.blocking ? 7.5 : 15;
+        e.health = Math.max(0, e.health - slashDamage);
         e.stun = Math.max(e.stun, .1);
         e.reaction = "slash";
-        p.damageDealt += 15;
+        p.damageDealt += slashDamage;
         game.shake = Math.max(game.shake, 8);
         for (let i = 0; i < 7; i++) {
           game.particles.push({
@@ -2238,6 +2473,10 @@
     e.heat = target.heat || 0;
     e.jackpot = target.jackpot || 0;
     e.charging = Boolean(target.charging);
+    e.techniqueCharge = Number(target.chargedSpecialTicks || 0) > 0
+      ? { name: "red", elapsed: Number(target.chargedSpecialTicks) / 60 }
+      : null;
+    e.moveConfiscation = Number(target.moveConfiscation || 0);
     e.comboStep = target.comboStep;
     e.airComboStep = target.airComboStep;
     if (target.attack) {
@@ -2458,13 +2697,15 @@
           red: "Reversal: Red",
           dismantle: "Dismantle",
           worldSlash: "World Slash",
+          fuga: "Fuga",
           door: "Shutter Doors",
           reserveBall: "Reserve Ball",
         };
         if (predictedRemote) {
           spawnParticles(
             target.x, target.y - target.h * .55,
-            o.type === "door" || o.type === "reserveBall" ? "#55f087"
+            o.type === "fuga" ? "#ff8a28"
+              : o.type === "door" || o.type === "reserveBall" ? "#55f087"
               : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
               : o.type === "red" ? "#ff315f" : "#8d55ff",
             o.strong ? 22 : 12, o.strong ? 430 : 290, o.strong ? 8 : 5, o.strong ? .65 : .38
@@ -2476,7 +2717,8 @@
             type: "special", damage: o.damage, kbX: o.kbX, kbY: o.kbY, strong: o.strong,
             fixedDamage: o.reflected,
             reaction: o.type === "dismantle" || o.type === "worldSlash" ? "slash" : o.type === "door" ? "body" : undefined,
-            color: o.type === "door" || o.type === "reserveBall" ? "#55f087"
+            color: o.type === "fuga" ? "#ff8a28"
+              : o.type === "door" || o.type === "reserveBall" ? "#55f087"
               : o.type === "dismantle" || o.type === "worldSlash" ? "#ff244f"
               : o.owner === "player" ? (o.type === "red" ? "#ff315f" : "#8d55ff") : "#ff4c73",
           });
@@ -2484,13 +2726,22 @@
         if (o.type === "purple") {
           damageProps(p, { strong: true, damage: 50, range: 400, y: -150, h: 180 });
         }
+        if (o.type === "fuga") {
+          target.burned = true;
+          game.shake = 25;
+          game.flash = .35;
+          for (let burst = 0; burst < 5; burst++) {
+            spawnParticles(target.x + rnd(-70, 70), GROUND - rnd(20, 180), burst % 2 ? "#ffbc45" : "#ff4d18", 24, 620, 12, 1);
+          }
+          announce("FUGA IMPACT");
+        }
         o.hitTarget = true;
         if (!o.erasing) o.life = 0;
       }
 
       if (o.life <= 0 || o.x < -300 || o.x > W + 300) {
-        if (["red", "purple", "dismantle", "worldSlash"].includes(o.type)) {
-          const color = o.type === "purple" ? "#8c5fff" : "#ff3d62";
+        if (["red", "purple", "dismantle", "worldSlash", "fuga"].includes(o.type)) {
+          const color = o.type === "purple" ? "#8c5fff" : o.type === "fuga" ? "#ff7a25" : "#ff3d62";
           spawnParticles(o.x, o.y, color, o.type === "purple" || o.type === "worldSlash" ? 34 : 20, 450, 8, .75);
         }
         game.projectiles.splice(i, 1);
@@ -2692,10 +2943,18 @@
     }
     game.online.localDomainWindow = Math.max(0, game.online.localDomainWindow - dt);
     game.online.remoteDomainWindow = Math.max(0, game.online.remoteDomainWindow - dt);
+    const domainBeforeDecay = game.domain;
     game.domain = Math.max(0, game.domain - dt);
     game.domainStartup = Math.max(0, game.domainStartup - dt);
     game.domainIntro = Math.max(0, game.domainIntro - dt);
     game.cinematic = Math.max(0, game.cinematic - dt);
+    const domainJustEnded = (game.domainPrevious > 0 && game.domain <= 0) || (domainBeforeDecay > 0 && game.domain <= 0);
+    if (domainJustEnded && game.player && (!game.online.active || !game.online.authoritative)
+      && game.domainOwnerSlot === (game.online.active ? game.online.slot : 1)) {
+      game.player.moveConfiscation = Math.max(game.player.moveConfiscation, 5);
+      announce("TECHNIQUES CONFISCATED 5s");
+    }
+    game.domainPrevious = game.domain;
     if (game.domain <= 0 && game.domainIntro <= 0) game.windPaused = false;
     if (game.domain <= 0 && game.domainStartup <= 0 && game.domainIntro <= 0) game.domainOwnerSlot = 0;
     if (!game.clash && game.blackFlash <= 0 && game.cinematic <= 0) game.cameraTarget = lerp(game.cameraTarget, 1, clamp(dt * 4.5, 0, 1));
@@ -2707,7 +2966,7 @@
   }
 
   function checkRound(dt) {
-    if (game.mode !== "training") game.time = Math.max(0, game.time - dt);
+    if (game.mode !== "training" && game.domain <= 0 && game.domainStartup <= 0) game.time = Math.max(0, game.time - dt);
     const p = game.player;
     const e = game.enemy;
     p.lagHealth = lerp(p.lagHealth, p.health, clamp(dt * 2, 0, 1));
@@ -2943,6 +3202,13 @@
           : p.canAwaken ? "AWAKENING READY" : profile.title;
     ui.playerState.textContent = p.charging
       ? `CHARGING CE ${p.energy.toFixed(0)}%`
+      : p.techniqueCharge
+        ? `${p.character === "sukuna" ? "DISMANTLE" : "RED"} CHARGE ${p.techniqueCharge.elapsed.toFixed(1)}/5.0s`
+      : p.moveConfiscation > 0
+          ? `TECHNIQUES CONFISCATED ${p.moveConfiscation.toFixed(1)}s`
+        : game.domain > 0 && game.domainOwnerSlot === (game.online.active ? game.online.slot : 1)
+          && ["gojo", "sukuna"].includes(game.domainCharacter)
+          ? `DOMAIN DRAIN ${game.domainCharacter === "gojo" ? 20 : 10} CE/s`
       : p.chargeRecovery > 0
         ? `CHARGE RECOVERY ${p.chargeRecovery.toFixed(1)}s`
         : p.chargeCooldown > 0 ? `CHARGE COOLDOWN ${p.chargeCooldown.toFixed(1)}s` : normalPlayerState;
@@ -2983,11 +3249,17 @@
       const burntOutLock = p.character === "gojo" && p.burnout > 0 && (name === "blue" || name === "red" || name === "domain");
       const purpleReady = p.character !== "gojo" || name !== "purple" || (game.unstablePurple?.state === "unstable");
       const worldSlashReady = p.character !== "sukuna" || name !== "purple" || p.worldSlashUnlocked;
-      el.classList.toggle("locked", p.energy < cost || cd > 0 || burntOutLock || !purpleReady || !worldSlashReady);
+      el.dataset.timer = p.techniqueCharge?.name === name
+        ? `${p.techniqueCharge.elapsed.toFixed(1)}s`
+        : cd > 0 ? `${cd.toFixed(1)}s` : "";
+      el.classList.toggle("locked", p.energy < cost || cd > 0 || p.moveConfiscation > 0 || burntOutLock || !purpleReady
+        || !worldSlashReady || (p.character === "sukuna" && name === "purple" && p.worldSlashUses >= 2));
       const hint = el.querySelector("b");
       if (hint && name === "purple") {
         hint.textContent = p.character === "sukuna" && !p.worldSlashUnlocked
-          ? `${p.dismantleUses}/10 D  ${p.cleaveUses}/5 C  ${p.sukunaDomainUses}/1 T`
+          ? `${p.dismantleUses}/5 D  ${p.cleaveUses}/2 C  ${p.sukunaDomainUses}/1 T`
+          : p.character === "sukuna"
+            ? `200 DMG / ${p.worldSlashUses}/2 USED`
           : p.character !== "gojo"
             ? `${cost} CE`
           : game.unstablePurple?.state === "unstable" ? "READY" : game.unstablePurple?.state === "firing" ? "FIRING" : "FUSE B+R";
@@ -3028,7 +3300,7 @@
 
   function jump() {
     const p = game.player;
-    if (!p || p.stun > 0 || p.blocking || p.charging || p.chargeRecovery > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!p || p.stun > 0 || p.blocking || p.charging || p.techniqueCharge || p.chargeRecovery > 0 || (game.online.active && Date.now() < game.online.startAt)) return;
     const jumpCancel = p.attack?.launcher && p.attack.hitConfirmed && p.attack.elapsed >= p.attack.start;
     if (p.attack && !jumpCancel) return;
     if (jumpCancel) {
@@ -3413,6 +3685,40 @@
       pixelRect(-20, -55, 6, 13, inverted ? "#6cd7ff" : "#e45b31");
     }
 
+    if (entity.attack?.type === "fuga" && !tint) {
+      const progress = clamp(entity.attack.elapsed / entity.attack.duration, 0, 1);
+      const flames = Math.min(5, 1 + Math.floor(progress * 6));
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < flames; i++) {
+        const spread = (i - (flames - 1) / 2) * 10;
+        const size = 7 + progress * 16 + i * 2;
+        ctx.fillStyle = i % 2 ? "#ffd35a" : "#ff5b1f";
+        ctx.beginPath();
+        ctx.moveTo(25 + spread, -73 - size);
+        ctx.lineTo(16 + spread, -66);
+        ctx.lineTo(31 + spread, -64);
+        ctx.closePath();
+        ctx.fill();
+      }
+      if (progress > .55) {
+        ctx.strokeStyle = "#ffb52f";
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(-17, -70);
+        ctx.lineTo(34 + progress * 28, -70);
+        ctx.stroke();
+        ctx.fillStyle = "#fff0a0";
+        ctx.beginPath();
+        ctx.moveTo(57 + progress * 28, -70);
+        ctx.lineTo(28 + progress * 28, -86);
+        ctx.lineTo(34 + progress * 28, -70);
+        ctx.lineTo(28 + progress * 28, -54);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
+
     if (entity.attack?.slash && !tint || ["dismantle", "cleave", "worldSlash"].includes(entity.attack?.type)) {
       ctx.globalAlpha *= .8;
       ctx.strokeStyle = energy;
@@ -3536,8 +3842,32 @@
     ctx.restore();
   }
 
+  function drawTechniqueCharge(entity) {
+    const elapsed = clamp(Number(entity.techniqueCharge?.elapsed || 0), 0, 5);
+    if (elapsed <= 0) return;
+    const ratio = elapsed / 5;
+    const sukuna = entity.character === "sukuna";
+    const color = sukuna ? "#ff3158" : "#ff274f";
+    const core = sukuna ? "#fff0f2" : "#fff7f8";
+    ctx.save();
+    ctx.translate(Math.round(entity.x + entity.facing * 34), Math.round(entity.y - 72));
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = .55 + ratio * .35;
+    ctx.fillStyle = `${color}55`;
+    ctx.beginPath();
+    ctx.arc(0, 0, 18 + ratio * 22, 0, Math.PI * 2);
+    ctx.fill();
+    pixelRect(-6 - ratio * 5, -6 - ratio * 5, 12 + ratio * 10, 12 + ratio * 10, core);
+    for (let i = 0; i < 4 + Math.floor(ratio * 8); i++) {
+      const angle = performance.now() * .004 + i * .9;
+      pixelRect(Math.cos(angle) * (20 + ratio * 18), Math.sin(angle) * (20 + ratio * 18), 5, 5, color);
+    }
+    ctx.restore();
+  }
+
   function drawFighter(entity, alpha = 1, tint = null) {
     if (entity?.charging && !tint) drawChargeAura(entity);
+    if (entity?.techniqueCharge && !tint) drawTechniqueCharge(entity);
     if (entity?.character === "hakari") drawHakari(entity, alpha, tint);
     else if (entity?.character === "sukuna") drawSukuna(entity, alpha, tint);
     else drawGojo(entity, alpha, tint);
@@ -3618,13 +3948,14 @@
           pixelRect(Math.cos(a) * 28, Math.sin(a) * 28, 4, 4, "#82eaff");
         }
       } else if (o.type === "red") {
+        const redSize = Number(o.w || 48);
         ctx.fillStyle = "#ff335844";
         ctx.beginPath();
-        ctx.arc(0, 0, 44, 0, Math.PI * 2);
+        ctx.arc(0, 0, redSize * .92, 0, Math.PI * 2);
         ctx.fill();
-        pixelRect(-24, -24, 48, 48, "#ef244f");
-        pixelRect(-14, -14, 28, 28, "#ff8ba3");
-        pixelRect(-6, -6, 12, 12, "#fff1f4");
+        pixelRect(-redSize / 2, -redSize / 2, redSize, redSize, "#ef244f");
+        pixelRect(-redSize * .29, -redSize * .29, redSize * .58, redSize * .58, "#ff8ba3");
+        pixelRect(-redSize * .125, -redSize * .125, redSize * .25, redSize * .25, "#fff1f4");
         for (let i = 0; i < 4; i++) pixelRect(-o.vx * .06 - i * Math.sign(o.vx) * 15, rnd(-18, 18), 12, 6, "#ff4569");
       } else if (o.type === "purple") {
         ctx.scale(Math.sign(o.vx), 1);
@@ -3668,6 +3999,26 @@
         pixelRect(-9, -9, 18, 18, color);
         pixelRect(-4, -4, 8, 8, "#f6ffe3");
         pixelRect(-Math.sign(o.vx) * 24, -3, 18, 6, color);
+      } else if (o.type === "fuga") {
+        ctx.rotate(Math.atan2(o.vy, o.vx));
+        const pulse = 1 + Math.sin(performance.now() * .02) * .12;
+        ctx.scale(pulse, pulse);
+        ctx.fillStyle = "#ff4d18";
+        ctx.beginPath();
+        ctx.moveTo(52, 0);
+        ctx.lineTo(-34, -28);
+        ctx.lineTo(-18, 0);
+        ctx.lineTo(-34, 28);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#ffd45c";
+        ctx.beginPath();
+        ctx.moveTo(38, 0);
+        ctx.lineTo(-20, -12);
+        ctx.lineTo(-8, 0);
+        ctx.lineTo(-20, 12);
+        ctx.closePath();
+        ctx.fill();
       } else {
         ctx.rotate(Math.atan2(o.vy, o.vx));
         pixelRect(-o.w / 2, -o.h / 2, o.w, o.h, "#6c183b");
@@ -4108,12 +4459,15 @@
         light: edges.light,
         heavy: edges.heavy,
         special: edges.special,
+        specialHeld: ["gojo", "sukuna"].includes(game.player.character) && keys.has("e") ? "red" : "",
+        specialRelease: edges.specialRelease,
+        fuga: edges.fuga,
         domain: edges.domain,
         awaken: edges.awaken,
       };
     game.online.inputEdges = {
       jump: false, dash: false, light: false, heavy: false,
-      special: "", domain: false, awaken: false,
+      special: "", specialRelease: "", fuga: false, domain: false, awaken: false,
     };
     game.online.predictionHistory.set(frame, {
       x: game.player.x,
@@ -4135,10 +4489,13 @@
       light: "M1 COMBO",
       heavy: "HEAVY ATTACK",
       roughPunch: "ROUGH CURSED PUNCH",
+      roughDownkick: "ROUGH DOWNKICK",
       cleave: "CLEAVE",
+      blueSkyfall: "BLUE SKYFALL",
       door: "SHUTTER DOORS",
       gamblersLuck: "GAMBLER'S LUCK",
       feverBreaker: "FEVER BREAKER",
+      fuga: "FUGA",
     };
     const duration = Math.max(.1, (attack.endTick - attack.startTick) / 60);
     return {
@@ -4239,6 +4596,35 @@
     } else if (event.kind === "worldSlashUnlocked") {
       announce(event.slot === game.online.slot ? "WORLD-CUTTING SLASH UNLOCKED" : "OPPONENT UNLOCKED WORLD SLASH");
       game.realityCrack = .3;
+    } else if (event.kind === "fugaStart" || event.kind === "fugaFire") {
+      announce(event.slot === game.online.slot ? "FUGA" : "OPPONENT: FUGA");
+      game.cinematic = Math.max(game.cinematic, .45);
+      game.cameraTarget = 1.2;
+      game.flash = .12;
+    } else if (event.kind === "fugaImpact") {
+      const victim = event.slot === game.online.slot ? game.player : game.enemy;
+      victim.burned = true;
+      game.shake = 25;
+      game.flash = .35;
+      for (let burst = 0; burst < 5; burst++) {
+        spawnParticles(victim.x + rnd(-70, 70), GROUND - rnd(20, 180), burst % 2 ? "#ffbc45" : "#ff4d18", 24, 620, 12, 1);
+      }
+    } else if (event.kind === "roughDownkick") {
+      const fighter = event.slot === game.online.slot ? game.player : game.enemy;
+      spawnShockwave(fighter.x, GROUND - 4, "#55f087");
+      spawnParticles(fighter.x, GROUND - 8, "#65705f", 38, 440, 10, .85);
+      game.shake = 16;
+    } else if (event.kind === "blueSkyfall") {
+      const victim = event.targetSlot === game.online.slot ? game.player : game.enemy;
+      spawnShockwave(victim.x, GROUND - 4, "#4e8fff");
+      spawnParticles(victim.x, GROUND - 8, "#65758d", 34, 430, 10, .85);
+      game.shake = 15;
+    } else if (event.kind === "shutterBreaker") {
+      announce(event.slot === game.online.slot ? "SHUTTER BREAKER" : "OPPONENT: SHUTTER BREAKER");
+      game.shake = 10;
+    } else if (event.kind === "movesConfiscated" && event.slot === game.online.slot) {
+      game.player.moveConfiscation = Number(event.durationTicks || 300) / 60;
+      announce("TECHNIQUES CONFISCATED 5s");
     } else if (event.kind === "feverBreakerLaunch" || event.kind === "feverBreakerKick") {
       const victim = event.slot === game.online.slot ? game.player : game.enemy;
       spawnParticles(victim.x, victim.y - 55, "#fff35d", 26, 480, 8, .7);
@@ -4324,6 +4710,17 @@
     game.player.cleaveUses = Number(local.cleaveUses || 0);
     game.player.sukunaDomainUses = Number(local.sukunaDomainUses || 0);
     game.player.worldSlashUnlocked = Boolean(local.worldSlashUnlocked);
+    game.player.worldSlashUses = Number(local.worldSlashUses || 0);
+    game.player.moveConfiscation = Number(local.moveConfiscationTicks || 0) / 60;
+    if (Number(local.chargedSpecialTicks || 0) > 0) {
+      game.player.techniqueCharge = {
+        name: "red",
+        elapsed: Number(local.chargedSpecialTicks || 0) / 60,
+        releaseDelay: Number(local.chargedReleaseTicks ?? -1) / 60,
+      };
+    } else if (game.player.techniqueCharge && !keys.has("e")) {
+      game.player.techniqueCharge = null;
+    }
     game.player.charging = Boolean(local.charging);
     game.player.burned = Boolean(local.burned);
     game.player.onlineVariant = local.variant === "inverted" ? "inverted" : "normal";
@@ -4344,6 +4741,8 @@
       cleaveUses: Number(remote.cleaveUses || 0),
       sukunaDomainUses: Number(remote.sukunaDomainUses || 0),
       worldSlashUnlocked: Boolean(remote.worldSlashUnlocked),
+      worldSlashUses: Number(remote.worldSlashUses || 0),
+      moveConfiscation: Number(remote.moveConfiscationTicks || 0) / 60,
       burnout: 0,
       burned: Boolean(remote.burned),
       variant: remote.variant === "inverted" ? "inverted" : "normal",
@@ -4688,12 +5087,22 @@
       shortDash();
     }
     if (key === "e") {
-      if (firstPress) queueOnlineEdge("special", "red");
-      useAbility("red");
+      if (game.player?.character === "sukuna" && keys.has("r") && firstPress) {
+        if (startFuga()) queueOnlineEdge("fuga");
+      } else if (["gojo", "sukuna"].includes(game.player?.character)) {
+        if (firstPress) beginChargedTechnique("red");
+      } else {
+        if (firstPress) queueOnlineEdge("special", "red");
+        useAbility("red");
+      }
     }
     if (key === "r") {
-      if (firstPress) queueOnlineEdge("special", "blue");
-      useAbility("blue");
+      if (game.player?.character === "sukuna" && keys.has("e") && firstPress) {
+        if (startFuga()) queueOnlineEdge("fuga");
+      } else {
+        if (firstPress) queueOnlineEdge("special", "blue");
+        useAbility("blue");
+      }
     }
     if (key === "q") {
       if (firstPress) queueOnlineEdge("special", "purple");
@@ -4711,8 +5120,13 @@
   });
 
   window.addEventListener("keyup", (event) => {
-    keys.delete(event.key.toLowerCase());
-    if (event.key.toLowerCase() === "s" && game.player) game.player.blocking = false;
+    const key = event.key.toLowerCase();
+    keys.delete(key);
+    if (key === "e" && ["gojo", "sukuna"].includes(game.player?.character)) {
+      releaseChargedTechnique();
+      queueOnlineEdge("specialRelease", "red");
+    }
+    if (key === "s" && game.player) game.player.blocking = false;
   });
 
   canvas.addEventListener("mousedown", (event) => {
