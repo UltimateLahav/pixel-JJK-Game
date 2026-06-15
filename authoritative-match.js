@@ -148,7 +148,6 @@ class AuthoritativeMatch {
     if (frame > this.tick + 120 || frame < this.tick - MAX_ROLLBACK) return;
     const input = normalizeInput(packet.input);
     this.inputs[slot].set(frame, input);
-    this.players[slot].lastInputFrame = Math.max(this.players[slot].lastInputFrame, frame);
     if (frame < this.tick && this.history.has(frame)) this.rollback(frame);
   }
 
