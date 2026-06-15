@@ -379,7 +379,7 @@
       lastHit: "READY", damageScale: 1, flash: 0,
       regenBoost: 0, damageRegen: 0, dashCooldown: 0, dashTime: 0, recoveryUsed: false,
       fastFalling: false, momentum: 0,
-      burnout: 0, burnoutSmoke: 0,
+      burnout: 0, burnoutSmoke: 0, burned: false,
       damageDealt: 0, pressure: 0, voiceCooldown: 0,
       heat: 0, jackpot: 0, parryHot: 0,
       nextM1Fast: false,
@@ -409,18 +409,18 @@
     };
   }
 
-  function makeRemotePlayer(slot = 2, name = "SATORU GOJO", character = "gojo") {
+  function makeRemotePlayer(slot = 2, name = "SATORU GOJO", character = "gojo", variant = "normal") {
     return {
       kind: "remote",
       character,
       type: { name, rank: characters[character]?.title || "THE STRONGEST", speed: 295, boss: false },
-      onlineVariant: slot === 2 && character === "gojo" ? "inverted" : "normal",
+      onlineVariant: variant === "inverted" ? "inverted" : "normal",
       x: slot === 1 ? 300 : 950, y: GROUND, w: 44, h: 92,
       vx: 0, vy: 0, facing: slot === 1 ? 1 : -1,
       health: 600, maxHealth: 600, lagHealth: 600, energy: 70,
       grounded: true, state: "idle", stateTime: 0, attack: null,
       stun: 0, invuln: 0, flash: 0, blocking: false,
-      reaction: "idle", wallSplat: 0, awakening: 0, burnout: 0,
+      reaction: "idle", wallSplat: 0, awakening: 0, burnout: 0, burned: false,
       heat: 0, jackpot: 0,
       charging: false,
       comboStep: -1, airComboStep: -1,
@@ -530,12 +530,14 @@
     const p2Character = localSlot === 1 ? options.remoteCharacter : options.localCharacter;
     const p1Name = localSlot === 1 ? options.localName : options.remoteName;
     const p2Name = localSlot === 1 ? options.remoteName : options.localName;
+    const p1Variant = localSlot === 1 ? options.localVariant : options.remoteVariant;
+    const p2Variant = localSlot === 1 ? options.remoteVariant : options.localVariant;
     ui.introP1.textContent = p1Name || "PLAYER 1";
     ui.introP2.textContent = p2Name || "PLAYER 2";
     ui.introCharacterP1.textContent = characters[p1Character]?.name || "CURSED SPIRIT";
     ui.introCharacterP2.textContent = characters[p2Character]?.name || "CURSED SPIRIT";
-    ui.introPortraitP1.className = `intro-silhouette ${p1Character || "curse"}`;
-    ui.introPortraitP2.className = `intro-silhouette ${p2Character || "curse"}${p2Character === "gojo" ? " inverted" : ""}`;
+    ui.introPortraitP1.className = `intro-silhouette ${p1Character || "curse"}${p1Variant === "inverted" ? " inverted" : ""}`;
+    ui.introPortraitP2.className = `intro-silhouette ${p2Character || "curse"}${p2Variant === "inverted" ? " inverted" : ""}`;
     ui.introDialogue.textContent = matchupDialogue(options.localCharacter, options.remoteCharacter);
   }
 
@@ -673,10 +675,15 @@
     game.time = Number(options.time) || 99;
     game.player.energy = Number(options.energy) || 70;
     game.player.character = selectedCharacter;
-    game.player.onlineVariant = options.slot === 2 && selectedCharacter === "gojo" ? "inverted" : "normal";
+    game.player.onlineVariant = options.localVariant === "inverted" ? "inverted" : "normal";
     game.player.x = options.slot === 1 ? 300 : 950;
     game.player.facing = options.slot === 1 ? 1 : -1;
-    game.enemy = makeRemotePlayer(options.slot === 1 ? 2 : 1, game.online.remoteName, game.online.remoteCharacter);
+    game.enemy = makeRemotePlayer(
+      options.slot === 1 ? 2 : 1,
+      game.online.remoteName,
+      game.online.remoteCharacter,
+      options.remoteVariant
+    );
     game.enemy.energy = Number(options.energy) || 70;
     ui.menu.classList.add("hidden");
     ui.result.classList.add("hidden");
@@ -724,11 +731,32 @@
     }
   }
 
+  function showPurpleCollapse(x, y) {
+    const fallbackX = game.player && game.enemy ? (game.player.x + game.enemy.x) / 2 : W / 2;
+    const fallbackY = game.player ? game.player.y - 70 : GROUND - 70;
+    const explosionX = Number.isFinite(Number(x)) ? Number(x) : fallbackX;
+    const explosionY = Number.isFinite(Number(y)) ? Number(y) : fallbackY;
+    game.unstablePurple = null;
+    game.remoteUnstablePurple = null;
+    if (game.player) game.player.burned = true;
+    if (game.enemy) game.enemy.burned = true;
+    game.flash = Math.max(game.flash, .28);
+    game.shake = Math.max(game.shake, 28);
+    game.cameraTarget = Math.max(game.cameraTarget, 1.28);
+    spawnParticles(explosionX, explosionY, "#08020f", 60, 760, 15, 1.2);
+    spawnParticles(explosionX, explosionY, "#a15cff", 90, 860, 13, 1.25);
+    spawnParticles(explosionX, explosionY, "#ff704a", 34, 620, 8, .85);
+    announce("PURPLE COLLAPSE");
+    tone(35, 1.1, "sawtooth", .48, 240);
+    noise(.8, .38);
+  }
+
   function addAfterimage(entity, color = "#55e7ff") {
     game.afterimages.push({
       x: entity.x, y: entity.y, facing: entity.facing,
       character: entity.character,
       onlineVariant: entity.onlineVariant,
+      burned: entity.burned,
       state: entity.state, attack: entity.attack ? { ...entity.attack } : null,
       life: .26, maxLife: .26, color,
     });
@@ -1330,22 +1358,13 @@
       e.stun = 1.35;
       e.reaction = "purpleBlast";
     }
-    game.unstablePurple = null;
-    game.purpleExplosion = .85;
-    game.glitch = .65;
-    game.flash = .45;
-    game.shake = 28;
-    game.cameraTarget = 1.38;
+    p.burned = true;
+    e.burned = true;
     game.props.forEach((prop) => {
       if (Math.abs(prop.x + prop.w / 2 - purple.x) < 500) prop.hp = 0;
     });
-    spawnParticles(purple.x, purple.y, "#08020f", 55, 720, 14, 1.2);
-    spawnParticles(purple.x, purple.y, "#a15cff", 80, 820, 12, 1.25);
-    spawnShockwave(purple.x, purple.y, "#c694ff");
-    announce("PURPLE COLLAPSE");
+    showPurpleCollapse(purple.x, purple.y);
     sendOnline("event", { kind: "purpleCollapse", x: purple.x, y: purple.y });
-    tone(35, 1.1, "sawtooth", .48, 240);
-    noise(.8, .38);
   }
 
   function activateDomain() {
@@ -2214,6 +2233,8 @@
     e.blocking = target.blocking;
     e.awakening = target.awakening;
     e.burnout = target.burnout;
+    e.burned = Boolean(target.burned);
+    e.onlineVariant = target.variant === "inverted" || target.onlineVariant === "inverted" ? "inverted" : "normal";
     e.heat = target.heat || 0;
     e.jackpot = target.jackpot || 0;
     e.charging = Boolean(target.charging);
@@ -2907,13 +2928,15 @@
     ui.playerPortrait.className = `portrait ${playerPortrait}`;
     ui.playerPortrait.querySelector("span").textContent = playerMark;
     ui.enemyName.textContent = `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
-    ui.enemyState.textContent = game.online.active ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}` : e.type.rank;
+    ui.enemyState.textContent = game.online.active
+      ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}${e.burned ? " / BURNED" : ""}`
+      : e.type.rank;
     const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
     const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : "VI";
     ui.enemyPortrait.className = `portrait ${game.online.active ? enemyPortrait : "curse-portrait"}`;
     ui.enemyPortrait.querySelector("span").textContent = game.online.active ? enemyMark : "CR";
     const normalPlayerState = game.online.active
-      ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
+      ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.burned ? " / BURNED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
       : p.awakening > 0
         ? `${p.character === "sukuna" ? "KING OF CURSES" : p.character === "hakari" ? "JACKPOT MODE" : "AWAKENED"} ${p.awakening.toFixed(1)}s`
         : p.burnout > 0 ? `BURNT OUT ${p.burnout.toFixed(1)}s`
@@ -3198,8 +3221,12 @@
       ctx.ellipse(0, -48, 43 + Math.sin(performance.now() * .01) * 5, 64, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    const palette = entity.burnout > 0 && !tint
-      ? ["#171419", "#2b242b", "#6d413a"]
+    const burned = Boolean(entity.burned || entity.burnout > 0);
+    const inverted = entity.onlineVariant === "inverted";
+    const palette = burned && !tint
+      ? inverted
+        ? ["#6b6870", "#958e94", "#c05c87"]
+        : ["#171419", "#2b242b", "#6d413a"]
       : entity.onlineVariant === "inverted"
         ? ["#edf7ff", "#b5d9e8", "#ff4f9c"]
         : selectedCostume === "snowfall"
@@ -3210,10 +3237,10 @@
     const dark = tint || palette[0];
     const mid = tint || palette[1];
     const edge = tint || palette[2];
-    const skin = tint || (entity.burnout > 0 ? "#6d4a45" : entity.onlineVariant === "inverted" ? "#dcaeb5" : "#f0c9bd");
-    const hair = tint || (entity.burnout > 0 ? "#625b61" : entity.onlineVariant === "inverted" ? "#17213a" : "#edfaff");
-    const hairShade = tint || (entity.burnout > 0 ? "#332d33" : entity.onlineVariant === "inverted" ? "#ff65ad" : "#9fd8ec");
-    const blind = tint || (entity.awakening > 0 ? "#baf7ff" : entity.onlineVariant === "inverted" ? "#f4fbff" : "#11162a");
+    const skin = tint || (burned ? (inverted ? "#a57979" : "#6d4a45") : inverted ? "#dcaeb5" : "#f0c9bd");
+    const hair = tint || (burned ? (inverted ? "#c8bec3" : "#625b61") : inverted ? "#17213a" : "#edfaff");
+    const hairShade = tint || (burned ? (inverted ? "#8f4868" : "#332d33") : inverted ? "#ff65ad" : "#9fd8ec");
+    const blind = tint || (entity.awakening > 0 ? "#baf7ff" : burned ? (inverted ? "#eee8ec" : "#09070b") : inverted ? "#f4fbff" : "#11162a");
 
     let legA = run * 9;
     let legB = -run * 9;
@@ -3277,6 +3304,11 @@
     pixelRect(-12, -98, 24, 3, entity.awakening > 0 && !tint ? "#ffffff" : blind);
     pixelRect(-9, -83, 18, 4, tint || "#c88f88");
     pixelRect(-5, -79, 10, 3, tint || "#f3d4c8");
+    if (burned && !tint) {
+      pixelRect(-14, -91, 5, 9, inverted ? "#54283b" : "#09070b");
+      pixelRect(5, -67, 7, 12, inverted ? "#763c55" : "#3a1717");
+      pixelRect(-17, -51, 5, 11, inverted ? "#d06c92" : "#d45137");
+    }
 
     ctx.restore();
     if (entity.flash > 0 && !tint) {
@@ -3311,12 +3343,14 @@
       }
     }
 
-    const dark = tint || "#171018";
-    const cloth = tint || (entity.onlineVariant === "inverted" ? "#f0e7df" : "#e5ddd2");
-    const red = tint || "#8e1835";
-    const energy = tint || "#ff244f";
-    const skin = tint || "#d5a199";
-    const hair = tint || "#e8b7bd";
+    const burned = Boolean(entity.burned);
+    const inverted = entity.onlineVariant === "inverted";
+    const dark = tint || (burned ? (inverted ? "#62646c" : "#11090b") : inverted ? "#e8edf4" : "#171018");
+    const cloth = tint || (burned ? (inverted ? "#b9b5af" : "#382b28") : inverted ? "#242c39" : "#e5ddd2");
+    const red = tint || (burned ? (inverted ? "#3f6a83" : "#61202a") : inverted ? "#2a8eb6" : "#8e1835");
+    const energy = tint || (burned ? (inverted ? "#65cfff" : "#ff6a32") : inverted ? "#48dfff" : "#ff244f");
+    const skin = tint || (burned ? (inverted ? "#aaa09d" : "#6f3c34") : inverted ? "#79aeb8" : "#d5a199");
+    const hair = tint || (burned ? (inverted ? "#d7dce2" : "#4a3230") : inverted ? "#274857" : "#e8b7bd");
     let legA = run * 10;
     let legB = -run * 10;
     if (!entity.grounded) { legA = 9; legB = -8; }
@@ -3373,6 +3407,11 @@
     pixelRect(-15, -91, 7, 3, tint || "#7d1730");
     pixelRect(8, -91, 7, 3, tint || "#7d1730");
     pixelRect(-3, -105, 3, 28, tint || "#68162c");
+    if (burned && !tint) {
+      pixelRect(-12, -103, 6, 10, inverted ? "#29495c" : "#090506");
+      pixelRect(7, -73, 8, 14, inverted ? "#3e758e" : "#35100f");
+      pixelRect(-20, -55, 6, 13, inverted ? "#6cd7ff" : "#e45b31");
+    }
 
     if (entity.attack?.slash && !tint || ["dismantle", "cleave", "worldSlash"].includes(entity.attack?.type)) {
       ctx.globalAlpha *= .8;
@@ -3412,13 +3451,15 @@
         for (let i = 0; i < 4; i++) pixelRect(rnd(-42, 42), rnd(-115, -15), rnd(4, 9), rnd(8, 20), i % 2 ? "#fff35d" : "#4dff87");
       }
     }
-    const dark = tint || "#171019";
-    const coat = tint || "#4c1767";
-    const coatEdge = tint || "#7e2aa5";
-    const shirt = tint || "#101a15";
-    const skin = tint || "#bd856f";
-    const hair = tint || "#3b172f";
-    const energy = tint || "#55f087";
+    const burned = Boolean(entity.burned);
+    const inverted = entity.onlineVariant === "inverted";
+    const dark = tint || (burned ? (inverted ? "#666769" : "#0b110d") : inverted ? "#ebe6f0" : "#171019");
+    const coat = tint || (burned ? (inverted ? "#8d807a" : "#263429") : inverted ? "#b9e898" : "#4c1767");
+    const coatEdge = tint || (burned ? (inverted ? "#d56f9f" : "#57634a") : inverted ? "#67d7ad" : "#7e2aa5");
+    const shirt = tint || (burned ? (inverted ? "#b9b9b0" : "#131813") : inverted ? "#e8dbf0" : "#101a15");
+    const skin = tint || (burned ? (inverted ? "#b2a199" : "#714733") : inverted ? "#77a997" : "#bd856f");
+    const hair = tint || (burned ? (inverted ? "#d5d0cd" : "#211a18") : inverted ? "#b9e5d2" : "#3b172f");
+    const energy = tint || (burned ? (inverted ? "#ff78b5" : "#95a84d") : inverted ? "#d43b9c" : "#55f087");
     let legA = run * 10;
     let legB = -run * 10;
     if (!entity.grounded) { legA = 8; legB = -8; }
@@ -3455,6 +3496,11 @@
     pixelRect(-12, -99, 10, 4, "#16080d");
     pixelRect(4, -99, 10, 4, "#16080d");
     pixelRect(-8, -86, 17, 4, "#672f34");
+    if (burned && !tint) {
+      pixelRect(-13, -104, 7, 11, inverted ? "#59404d" : "#080907");
+      pixelRect(5, -71, 8, 13, inverted ? "#a34972" : "#313a20");
+      pixelRect(-21, -57, 6, 14, inverted ? "#ff77b3" : "#a8bb50");
+    }
     if (entity.attack?.rough && !tint) {
       ctx.strokeStyle = energy;
       ctx.lineWidth = fever ? 8 : 5;
@@ -4005,16 +4051,6 @@
         ctx.strokeRect(12 + (1 - pulse) * 40, 12 + (1 - pulse) * 40, W - 24 - (1 - pulse) * 80, H - 24 - (1 - pulse) * 80);
       }
     }
-    if (game.purpleExplosion > 0) {
-      const phase = game.purpleExplosion / .85;
-      ctx.fillStyle = `rgba(102,35,190,${phase * .36})`;
-      ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = `rgba(236,218,255,${phase})`;
-      ctx.lineWidth = 10;
-      ctx.beginPath();
-      ctx.arc(W / 2, H / 2, (1 - phase) * W * .8, 0, Math.PI * 2);
-      ctx.stroke();
-    }
     if (game.flash > 0) {
       ctx.fillStyle = `rgba(225,250,255,${clamp(game.flash * 2.8, 0, .7)})`;
       ctx.fillRect(0, 0, W, H);
@@ -4148,11 +4184,7 @@
         };
       }
     } else if (event.kind === "purpleCollapse") {
-      announce("PURPLE COLLAPSE");
-      game.purpleExplosion = .85;
-      game.glitch = .65;
-      game.shake = 24;
-      game.remoteUnstablePurple = null;
+      showPurpleCollapse(event.x, event.y);
     } else if (event.kind === "domainStart") {
       game.domainCharacter = event.character || "gojo";
       game.domainOwnerSlot = Number(event.slot || 0);
@@ -4293,6 +4325,8 @@
     game.player.sukunaDomainUses = Number(local.sukunaDomainUses || 0);
     game.player.worldSlashUnlocked = Boolean(local.worldSlashUnlocked);
     game.player.charging = Boolean(local.charging);
+    game.player.burned = Boolean(local.burned);
+    game.player.onlineVariant = local.variant === "inverted" ? "inverted" : "normal";
     for (const [name, ticks] of Object.entries(local.cooldowns || {})) {
       if (name in game.player.cooldowns) game.player.cooldowns[name] = Number(ticks) / 60;
     }
@@ -4311,6 +4345,8 @@
       sukunaDomainUses: Number(remote.sukunaDomainUses || 0),
       worldSlashUnlocked: Boolean(remote.worldSlashUnlocked),
       burnout: 0,
+      burned: Boolean(remote.burned),
+      variant: remote.variant === "inverted" ? "inverted" : "normal",
       state: Number(remote.dashTicks || 0) > 0 ? "dash" : remote.attack ? "attack" : remote.charging ? "charge" : Math.abs(remote.vx) > 10 ? "run" : "idle",
       attack: authoritativeAttack(remote, snapshot.tick),
       snapshotTick: snapshot.tick,
@@ -4429,6 +4465,7 @@
       charging: p.charging,
       health: Math.max(0, p.health), energy: p.energy,
       awakening: p.awakening, burnout: p.burnout,
+      burned: p.burned, onlineVariant: p.onlineVariant,
       heat: p.heat, jackpot: p.jackpot,
       comboStep: p.comboStep, airComboStep: p.airComboStep,
       attack,
@@ -4584,11 +4621,7 @@
       spawnParticles(event.x, event.y, "#814dff", 45, 390, 9, 1);
       announce("UNSTABLE HOLLOW PURPLE");
     } else if (event.kind === "purpleCollapse") {
-      game.purpleExplosion = .85;
-      game.glitch = .65;
-      game.flash = .45;
-      game.shake = 28;
-      spawnParticles(event.x, event.y, "#a15cff", 70, 760, 12, 1.2);
+      showPurpleCollapse(event.x, event.y);
     } else if (event.kind === "jackpot") {
       game.enemy.jackpot = Number(event.duration || 38);
       game.enemy.awakening = game.enemy.jackpot;
