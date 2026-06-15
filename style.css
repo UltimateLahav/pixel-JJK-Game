@@ -1021,11 +1021,23 @@ canvas {
   width: 92px;
   height: 37px;
   padding: 7px 7px 5px 35px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #7183a866;
   background: #080c18dc;
   font-size: 10px;
   letter-spacing: 1px;
+}
+.ability-strip > div::after {
+  content: attr(data-timer);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  transform: translateX(-50%);
+  min-width: 44px;
+  color: #fff4c2;
+  font: 700 10px/1 Consolas, monospace;
+  text-align: center;
+  text-shadow: 0 0 8px #ffcf55;
 }
 .ability-strip kbd {
   position: absolute;
