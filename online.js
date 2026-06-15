@@ -277,6 +277,8 @@
           remoteName: state.room.players.find((p) => p.slot !== state.slot)?.name || "Gojo",
           localCharacter: state.room.players.find((p) => p.slot === state.slot)?.character || "gojo",
           remoteCharacter: state.room.players.find((p) => p.slot !== state.slot)?.character || "gojo",
+          localVariant: state.room.players.find((p) => p.slot === state.slot)?.variant || "normal",
+          remoteVariant: state.room.players.find((p) => p.slot !== state.slot)?.variant || "normal",
         });
         ui.panel.classList.add("hidden");
       }
@@ -312,6 +314,8 @@
       card.querySelector(".slot-ready").textContent = player?.ready ? "READY" : "NOT READY";
       card.classList.toggle("ready", Boolean(player?.ready));
       card.classList.toggle("offline", Boolean(player && !player.connected));
+      card.classList.toggle("inverted", player?.variant === "inverted");
+      card.querySelector(".mini-gojo").classList.toggle("inverted", player?.variant === "inverted");
     }
 
     const host = isHost();
@@ -352,6 +356,8 @@
       character: local?.character || "gojo",
       localName: local?.name || "PLAYER",
       remoteName: remote?.name || "OPPONENT",
+      localVariant: local?.variant || "normal",
+      remoteVariant: remote?.variant || "normal",
     });
     window.VoidLimitOnline?.selectionState?.(state.room, state.slot);
   }
@@ -401,6 +407,8 @@
       remoteCharacter: remote?.character || "gojo",
       localName: local?.name || "Gojo",
       remoteName: remote?.name || "Gojo",
+      localVariant: local?.variant || "normal",
+      remoteVariant: remote?.variant || "normal",
     });
     window.VoidLimitOnline?.start?.({
       slot: state.slot,
@@ -412,6 +420,8 @@
       remoteName: state.room.players.find((p) => p.slot !== state.slot)?.name || "Gojo",
       localCharacter: local?.character || "gojo",
       remoteCharacter: remote?.character || "gojo",
+      localVariant: local?.variant || "normal",
+      remoteVariant: remote?.variant || "normal",
     });
 
     const timer = setInterval(() => {
