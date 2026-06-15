@@ -117,6 +117,13 @@ canvas {
   font-size: 15px;
   letter-spacing: 2px;
 }
+.build-stamp {
+  margin: -8px 0 12px;
+  color: #ff83bf;
+  font: 700 9px/1.2 Consolas, monospace;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 10px #ff4fa766;
+}
 
 .mode-grid {
   width: min(760px, 65vw);
