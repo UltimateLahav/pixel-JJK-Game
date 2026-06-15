@@ -78,6 +78,7 @@ function makePlayer(meta, settings) {
   return {
     slot,
     character: CHARACTER[meta.character] ? meta.character : "gojo",
+    variant: meta.variant === "inverted" ? "inverted" : "normal",
     x: slot === 1 ? 300 : 950,
     y: GROUND,
     vx: 0,
@@ -107,6 +108,9 @@ function makePlayer(meta, settings) {
     awakeningTicks: 0,
     jackpotTicks: 0,
     unstablePurpleTicks: 0,
+    unstablePurpleX: 640,
+    unstablePurpleY: GROUND - 86,
+    burned: false,
     dismantleUses: 0,
     cleaveUses: 0,
     sukunaDomainUses: 0,
@@ -258,7 +262,15 @@ class AuthoritativeMatch {
       opponent.health = Math.max(0, opponent.health - 38);
       player.stun = Math.max(player.stun, 69);
       opponent.stun = Math.max(opponent.stun, 81);
-      this.events.push({ kind: "purpleCollapse", slot: player.slot, tick: this.tick });
+      player.burned = true;
+      opponent.burned = true;
+      this.events.push({
+        kind: "purpleCollapse",
+        slot: player.slot,
+        x: player.unstablePurpleX,
+        y: player.unstablePurpleY,
+        tick: this.tick,
+      });
     }
     player.unstablePurpleTicks = Math.max(0, player.unstablePurpleTicks - 1);
     if (player.domainStartupTicks > 0) {
@@ -775,9 +787,11 @@ class AuthoritativeMatch {
         const owner = this.players[blue.owner];
         if (owner?.character !== "gojo") continue;
         owner.unstablePurpleTicks = 228;
+        owner.unstablePurpleX = (blue.x + red.x) / 2;
+        owner.unstablePurpleY = (blue.y + red.y) / 2;
         this.events.push({
           kind: "purpleFusion", slot: owner.slot,
-          x: (blue.x + red.x) / 2, y: (blue.y + red.y) / 2,
+          x: owner.unstablePurpleX, y: owner.unstablePurpleY,
           durationTicks: 228, tick: this.tick,
         });
         this.projectiles.splice(Math.max(i, j), 1);
@@ -841,6 +855,7 @@ class AuthoritativeMatch {
     const serializePlayer = (player) => ({
       slot: player.slot,
       character: player.character,
+      variant: player.variant,
       x: player.x, y: player.y, vx: player.vx, vy: player.vy,
       facing: player.facing, grounded: player.grounded,
       health: player.health, maxHealth: MAX_HEALTH, energy: player.energy,
@@ -863,6 +878,7 @@ class AuthoritativeMatch {
       awakeningTicks: player.awakeningTicks,
       jackpotTicks: player.jackpotTicks,
       unstablePurpleTicks: player.unstablePurpleTicks,
+      burned: player.burned,
       dismantleUses: player.dismantleUses,
       cleaveUses: player.cleaveUses,
       sukunaDomainUses: player.sukunaDomainUses,
