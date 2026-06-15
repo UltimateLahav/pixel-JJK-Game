@@ -162,6 +162,8 @@
       authoritative: true,
       serverFrame: 0,
       lastEventTick: -1,
+      latestInputFrame: -1,
+      lastAckFrame: -1,
       interpolationTicks: 6,
       snapshotBuffer: [],
       predictionHistory: new Map(),
@@ -655,6 +657,8 @@
     game.online.remoteDomainWindow = 0;
     game.online.serverFrame = 0;
     game.online.lastEventTick = -1;
+    game.online.latestInputFrame = -1;
+    game.online.lastAckFrame = -1;
     game.online.snapshotBuffer.length = 0;
     game.online.predictionHistory.clear();
     game.online.correctionX = 0;
@@ -4081,6 +4085,7 @@
       vx: game.player.vx,
       vy: game.player.vy,
     });
+    game.online.latestInputFrame = Math.max(game.online.latestInputFrame, frame);
     for (const savedFrame of game.online.predictionHistory.keys()) {
       if (savedFrame < frame - 180) game.online.predictionHistory.delete(savedFrame);
     }
@@ -4247,25 +4252,31 @@
 
     const errorX = local.x - game.player.x;
     const errorY = local.y - game.player.y;
+    const ackFrame = Number(local.ackFrame ?? -1);
+    game.online.lastAckFrame = Math.max(game.online.lastAckFrame, ackFrame);
+    const hasUnacknowledgedInput = game.online.latestInputFrame > ackFrame;
+    const localMovementActive = (keys.has("a") !== keys.has("d"))
+      || game.player.dashTime > 0
+      || Math.abs(game.player.vx) > 20;
     const frozenByRemoteVoid = remote.character === "gojo" && Number(remote.domainTicks || 0) > 0;
     const forcedGameplayState = Number(local.stun || 0) > 0 || frozenByRemoteVoid;
-    const rollbackNeedsCorrection = Boolean(snapshot.correction)
-      && (Math.abs(errorX) > 36 || Math.abs(errorY) > 28);
-    const serverMustTakeControl = forcedGameplayState || rollbackNeedsCorrection;
-    if (Math.abs(errorX) > 110 || Math.abs(errorY) > 85) {
+    const canReconcilePosition = forcedGameplayState
+      || (!hasUnacknowledgedInput && !localMovementActive && !game.player.attack && !game.player.charging);
+    if (forcedGameplayState && (Math.abs(errorX) > 110 || Math.abs(errorY) > 85)) {
       game.player.x = local.x;
       game.player.y = local.y;
       game.online.correctionX = 0;
       game.online.correctionY = 0;
     } else {
-      game.online.correctionX = serverMustTakeControl && Math.abs(errorX) >= 10
-        ? clamp(errorX * .7, -60, 60)
+      const correctionScale = forcedGameplayState ? .7 : .28;
+      game.online.correctionX = canReconcilePosition && Math.abs(errorX) >= 12
+        ? clamp(errorX * correctionScale, -48, 48)
         : 0;
-      game.online.correctionY = serverMustTakeControl && Math.abs(errorY) >= 8
-        ? clamp(errorY * .7, -48, 48)
+      game.online.correctionY = canReconcilePosition && Math.abs(errorY) >= 10
+        ? clamp(errorY * correctionScale, -40, 40)
         : 0;
     }
-    if (serverMustTakeControl) {
+    if (forcedGameplayState) {
       game.player.vx = Number(local.vx || 0);
       game.player.vy = Number(local.vy || 0);
     }
