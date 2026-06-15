@@ -126,6 +126,7 @@ function makePlayer(meta, settings) {
     worldSlashUses: 0,
     chargedSpecialTicks: 0,
     chargedReleaseTicks: -1,
+    dismantleVolley: null,
     moveConfiscationTicks: 0,
     fugaTicks: 0,
     fugaFired: false,
@@ -397,6 +398,7 @@ class AuthoritativeMatch {
       return;
     }
 
+    this.updateDismantleVolley(player, opponent);
     if (input.fuga && !player.attack) this.startFuga(player);
     if (this.updateChargedSpecial(player, opponent, input)) {
       player.vx = 0;
@@ -508,7 +510,7 @@ class AuthoritativeMatch {
   updateChargedSpecial(player, opponent, input) {
     const supportsCharge = ["gojo", "sukuna"].includes(player.character);
     if (!supportsCharge) return false;
-    const cost = player.character === "sukuna" ? 32 : 26;
+    const cost = player.character === "sukuna" ? 16 : 26;
     if (input.specialHeld === "red" && player.chargedSpecialTicks <= 0
       && player.chargedReleaseTicks < 0 && !player.attack && player.cooldowns.red <= 0
       && player.energy >= cost && player.moveConfiscationTicks <= 0 && player.stun <= 0) {
@@ -517,6 +519,10 @@ class AuthoritativeMatch {
       player.chargedSpecialTicks = Math.min(300, player.chargedSpecialTicks + 1);
     }
     if (player.chargedSpecialTicks <= 0) return false;
+    if (input.specialRelease === "red" && player.chargedSpecialTicks <= 18 && player.chargedReleaseTicks < 0) {
+      this.fireQuickSpecial(player, opponent);
+      return false;
+    }
     if ((input.specialRelease === "red" || player.chargedSpecialTicks >= 300) && player.chargedReleaseTicks < 0) {
       player.chargedReleaseTicks = 30;
     }
@@ -525,6 +531,95 @@ class AuthoritativeMatch {
       if (player.chargedReleaseTicks <= 0) this.fireChargedSpecial(player, opponent);
     }
     return player.chargedSpecialTicks > 0;
+  }
+
+  dismantleMode(player) {
+    if (player.grounded) return "straight";
+    return player.jumps === 0 ? "autoAim" : "groundSlash";
+  }
+
+  fireDismantleSlash(player, opponent, volley) {
+    const direction = opponent.x >= player.x ? 1 : -1;
+    const originX = player.x + direction * 55;
+    const originY = player.y - 72;
+    let vx = direction * 760;
+    let vy = 0;
+    if (volley.mode === "groundSlash") {
+      vx = 0;
+      vy = 900;
+    } else if (volley.mode === "autoAim") {
+      const dx = opponent.x - originX;
+      const dy = opponent.y - 46 - originY;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      vx = dx / distance * 760;
+      vy = dy / distance * 760;
+    }
+    this.projectiles.push({
+      id: `${player.slot}-${this.tick}-dismantle-volley-${volley.sequence}`,
+      owner: player.slot, kind: "dismantle",
+      x: originX, y: originY,
+      vx, vy, life: 52, damage: volley.damage, radius: 28,
+      strong: false, reflected: false,
+    });
+    volley.sequence++;
+  }
+
+  queueDismantleVolley(player, opponent, count, damage) {
+    const volley = {
+      remaining: count,
+      nextTick: this.tick,
+      damage,
+      mode: this.dismantleMode(player),
+      sequence: 0,
+    };
+    this.fireDismantleSlash(player, opponent, volley);
+    volley.remaining--;
+    volley.nextTick = this.tick + 12;
+    player.dismantleVolley = volley.remaining > 0 ? volley : null;
+  }
+
+  updateDismantleVolley(player, opponent) {
+    const volley = player.dismantleVolley;
+    if (!volley || this.tick < volley.nextTick) return;
+    this.fireDismantleSlash(player, opponent, volley);
+    volley.remaining--;
+    volley.nextTick += 12;
+    if (volley.remaining <= 0) player.dismantleVolley = null;
+  }
+
+  fireQuickSpecial(player, opponent) {
+    player.chargedSpecialTicks = 0;
+    player.chargedReleaseTicks = -1;
+    if (player.character === "gojo") {
+      player.energy -= 26;
+      player.cooldowns.red = CHARACTER.gojo.specials.red.cooldown;
+      this.projectiles.push({
+        id: `${player.slot}-${this.tick}-quick-red`,
+        owner: player.slot, kind: "red",
+        x: player.x + player.facing * 55, y: player.y - 80,
+        vx: player.facing * 510, vy: 0, life: 90,
+        damage: 18, radius: 24, strong: true, reflected: false,
+      });
+      player.attack = {
+        kind: "red", startTick: this.tick, activeTick: this.tick,
+        endActiveTick: this.tick, endTick: this.tick + 40,
+        damage: 0, range: 0, strong: false, hit: true,
+      };
+      this.events.push({ kind: "specialCast", slot: player.slot, technique: "red", charge: 0, tick: this.tick });
+      return;
+    }
+
+    player.energy -= 16;
+    player.cooldowns.red = CHARACTER.sukuna.specials.red.cooldown;
+    player.dismantleUses++;
+    this.updateWorldSlashUnlock(player);
+    player.attack = {
+      kind: "dismantle", startTick: this.tick, activeTick: this.tick,
+      endActiveTick: this.tick, endTick: this.tick + 25,
+      damage: 0, range: 0, strong: false, hit: true,
+    };
+    this.queueDismantleVolley(player, opponent, 1, 15);
+    this.events.push({ kind: "specialCast", slot: player.slot, technique: "dismantle", count: 1, charge: 0, tick: this.tick });
   }
 
   fireChargedSpecial(player, opponent) {
@@ -551,33 +646,21 @@ class AuthoritativeMatch {
       return;
     }
 
+    if (player.energy < 32) {
+      player.chargedSpecialTicks = Math.min(player.chargedSpecialTicks || 1, 18);
+      this.fireQuickSpecial(player, opponent);
+      return;
+    }
     player.energy -= 32;
     player.cooldowns.red = CHARACTER.sukuna.specials.red.cooldown;
     player.dismantleUses++;
     this.updateWorldSlashUnlock(player);
     const count = 1 + Math.floor(ratio * 5);
     const damage = 15 * (.8 - ratio * .5);
-    const doubleJump = !player.grounded && player.jumps === 0;
-    const singleJump = !player.grounded && !doubleJump;
-    for (let i = 0; i < count; i++) {
-      const targetX = doubleJump ? opponent.x : player.x + player.facing * (100 + i * 28);
-      const targetY = doubleJump ? opponent.y - 46 : singleJump ? GROUND - 10 : player.y - 72 + (i % 2 ? 18 : -12);
-      const dx = targetX - (player.x + player.facing * 55);
-      const dy = targetY - (player.y - 72);
-      const distance = Math.max(1, Math.hypot(dx, dy));
-      this.projectiles.push({
-        id: `${player.slot}-${this.tick}-charged-dismantle-${i}`,
-        owner: player.slot, kind: "dismantle",
-        x: player.x + player.facing * 55, y: player.y - 72,
-        vx: singleJump ? 0 : dx / distance * 760,
-        vy: singleJump ? 900 : dy / distance * 760,
-        life: 52 + i * 2, damage, radius: 28,
-        strong: false, reflected: false,
-      });
-    }
+    this.queueDismantleVolley(player, opponent, count, damage);
     player.attack = {
       kind: "dismantle", startTick: this.tick, activeTick: this.tick,
-      endActiveTick: this.tick, endTick: this.tick + 33,
+      endActiveTick: this.tick, endTick: this.tick + 25 + (count - 1) * 12,
       damage: 0, range: 0, strong: false, hit: true,
     };
     this.events.push({ kind: "specialCast", slot: player.slot, technique: "dismantleBarrage", count, charge: ratio, tick: this.tick });
