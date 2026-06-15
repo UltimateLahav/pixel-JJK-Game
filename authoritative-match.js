@@ -9,7 +9,8 @@ const SNAPSHOT_INTERVAL = 3;
 const DOMAIN_STARTUP_TICKS = 141;
 const EMPTY_INPUT = Object.freeze({
   move: 0, jump: false, dash: false, block: false, charge: false,
-  light: false, heavy: false, special: "", domain: false, awaken: false,
+  light: false, heavy: false, special: "", specialHeld: "", specialRelease: "",
+  fuga: false, domain: false, awaken: false,
 });
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -33,7 +34,7 @@ const CHARACTER = {
     specials: {
       red: { cost: 16, cooldown: 204, kind: "dismantle", damage: 15 },
       blue: { cost: 22, cooldown: 312, kind: "cleave", damage: 18 },
-      purple: { cost: 95, cooldown: 900, kind: "worldSlash", damage: 117 },
+      purple: { cost: 95, cooldown: 900, kind: "worldSlash", damage: 200 },
     },
   },
   hakari: {
@@ -43,13 +44,15 @@ const CHARACTER = {
     specials: {
       red: { cost: 16, cooldown: 228, kind: "roughPunch", damage: 14.5 },
       blue: { cost: 20, cooldown: 330, kind: "door", damage: 13 },
-      purple: { cost: 14, cooldown: 168, kind: "reserveBall", damage: 7.2 },
+      purple: { cost: 14, cooldown: 252, kind: "reserveBall", damage: 30 },
     },
   },
 };
 
 function normalizeInput(raw = {}) {
   const special = ["red", "blue", "purple"].includes(raw.special) ? raw.special : "";
+  const specialHeld = raw.specialHeld === "red" ? "red" : "";
+  const specialRelease = raw.specialRelease === "red" ? "red" : "";
   return {
     move: clamp(Math.round(Number(raw.move) || 0), -1, 1),
     jump: Boolean(raw.jump),
@@ -59,6 +62,9 @@ function normalizeInput(raw = {}) {
     light: Boolean(raw.light),
     heavy: Boolean(raw.heavy),
     special,
+    specialHeld,
+    specialRelease,
+    fuga: Boolean(raw.fuga),
     domain: Boolean(raw.domain),
     awaken: Boolean(raw.awaken),
   };
@@ -70,6 +76,7 @@ function heldInput(input) {
     move: input.move,
     block: input.block,
     charge: input.charge,
+    specialHeld: input.specialHeld,
   };
 }
 
@@ -85,6 +92,7 @@ function makePlayer(meta, settings) {
     vy: 0,
     facing: slot === 1 ? 1 : -1,
     grounded: true,
+    jumps: 1,
     health: MAX_HEALTH,
     energy: Number(settings.energy) || 70,
     blocking: false,
@@ -115,6 +123,12 @@ function makePlayer(meta, settings) {
     cleaveUses: 0,
     sukunaDomainUses: 0,
     worldSlashUnlocked: false,
+    worldSlashUses: 0,
+    chargedSpecialTicks: 0,
+    chargedReleaseTicks: -1,
+    moveConfiscationTicks: 0,
+    fugaTicks: 0,
+    fugaFired: false,
     hakariRollInputs: [],
     hakariLastRarity: "",
     hakariRollAttempts: 0,
@@ -133,6 +147,7 @@ class AuthoritativeMatch {
     this.startAt = Number(startAt);
     this.seed = Number(seed) || 1;
     this.tick = 0;
+    this.roundTicks = 0;
     this.players = Object.fromEntries(players.map((player) => [player.slot, makePlayer(player, this.settings)]));
     this.inputs = { 1: new Map(), 2: new Map() };
     this.lastInputs = { 1: { ...EMPTY_INPUT }, 2: { ...EMPTY_INPUT } };
@@ -194,6 +209,7 @@ class AuthoritativeMatch {
       result: clone(this.result),
       lastInputs: clone(this.lastInputs),
       events: clone(this.events),
+      roundTicks: this.roundTicks,
     });
     for (const frame of this.history.keys()) {
       if (frame < this.tick - MAX_ROLLBACK - 2) this.history.delete(frame);
@@ -207,6 +223,7 @@ class AuthoritativeMatch {
     this.result = clone(saved.result);
     this.lastInputs = clone(saved.lastInputs);
     this.events = clone(saved.events || []);
+    this.roundTicks = Number(saved.roundTicks || 0);
   }
 
   inputFor(slot) {
@@ -225,6 +242,7 @@ class AuthoritativeMatch {
     const input2 = this.inputFor(2);
     if (this.clash) {
       this.updateClash(input1, input2);
+      if (!this.domainClockPaused()) this.roundTicks++;
       this.tick++;
       this.checkResult();
       if (!resimulating && this.tick % SNAPSHOT_INTERVAL === 0) this.emitSnapshot(false);
@@ -233,6 +251,7 @@ class AuthoritativeMatch {
     this.updatePlayer(this.players[1], this.players[2], input1);
     this.updatePlayer(this.players[2], this.players[1], input2);
     if (this.resolveMeleeClash()) {
+      if (!this.domainClockPaused()) this.roundTicks++;
       this.tick++;
       if (!resimulating && this.tick % SNAPSHOT_INTERVAL === 0) this.emitSnapshot(false);
       return;
@@ -241,9 +260,14 @@ class AuthoritativeMatch {
     this.resolveAttacks(this.players[2], this.players[1]);
     this.updateProjectiles();
     this.updateClash(input1, input2);
+    if (!this.domainClockPaused()) this.roundTicks++;
     this.tick++;
     this.checkResult();
     if (!resimulating && this.tick % SNAPSHOT_INTERVAL === 0) this.emitSnapshot(false);
+  }
+
+  domainClockPaused() {
+    return Object.values(this.players).some((player) => player.domainTicks > 0 || player.domainStartupTicks > 0);
   }
 
   updatePlayer(player, opponent, input) {
@@ -257,6 +281,24 @@ class AuthoritativeMatch {
     player.invuln = Math.max(0, player.invuln - 1);
     player.awakeningTicks = Math.max(0, player.awakeningTicks - 1);
     player.jackpotTicks = Math.max(0, player.jackpotTicks - 1);
+    player.moveConfiscationTicks = Math.max(0, player.moveConfiscationTicks - 1);
+    if (player.fugaTicks > 0) {
+      player.fugaTicks--;
+      player.invuln = Math.max(player.invuln, 2);
+      player.vx = 0;
+      if (!player.fugaFired && player.fugaTicks <= 63) {
+        player.fugaFired = true;
+        this.projectiles.push({
+          id: `${player.slot}-${this.tick}-fuga`,
+          owner: player.slot, kind: "fuga",
+          x: player.x + player.facing * 62, y: player.y - 76,
+          vx: player.facing * 820, vy: 0, life: 84,
+          damage: 90, radius: 42, strong: true, reflected: false, burns: true,
+        });
+        this.events.push({ kind: "fugaFire", slot: player.slot, x: player.x, y: player.y - 76, tick: this.tick });
+      }
+      if (player.fugaTicks === 0) player.fugaFired = false;
+    }
     if (player.unstablePurpleTicks === 1) {
       player.health = Math.max(0, player.health - 30);
       opponent.health = Math.max(0, opponent.health - 38);
@@ -273,6 +315,7 @@ class AuthoritativeMatch {
       });
     }
     player.unstablePurpleTicks = Math.max(0, player.unstablePurpleTicks - 1);
+    const domainWasActive = player.domainTicks > 0;
     if (player.domainStartupTicks > 0) {
       player.domainStartupTicks--;
       if (player.domainStartupTicks === 0 && player.pendingDomainTicks > 0) {
@@ -287,11 +330,19 @@ class AuthoritativeMatch {
     } else if (player.domainTicks > 0) {
       player.domainTicks--;
       player.domainElapsedTicks++;
+      if (player.character === "gojo" || player.character === "sukuna") {
+        player.energy = Math.max(0, player.energy - (player.character === "gojo" ? 20 : 10) / TICK_RATE);
+        if (player.energy <= 0) player.domainTicks = 0;
+      }
     } else {
       player.domainElapsedTicks = 0;
     }
+    if (domainWasActive && player.domainTicks <= 0) {
+      player.moveConfiscationTicks = Math.max(player.moveConfiscationTicks, 300);
+      this.events.push({ kind: "movesConfiscated", slot: player.slot, durationTicks: 300, tick: this.tick });
+    }
     if (player.domainTicks > 0 && player.character === "sukuna" && player.domainElapsedTicks > 0 && player.domainElapsedTicks % 30 === 0) {
-      const damage = Math.min(15, opponent.health);
+      const damage = Math.min(opponent.blocking ? 7.5 : 15, opponent.health);
       opponent.health = Math.max(0, opponent.health - damage);
       opponent.stun = Math.max(opponent.stun, 6);
       player.damage += damage;
@@ -322,7 +373,7 @@ class AuthoritativeMatch {
     if (player.jackpotTicks > 0) {
       player.energy = 100;
       player.health = Math.min(MAX_HEALTH, player.health + .12);
-    } else {
+    } else if (!(player.domainTicks > 0 && ["gojo", "sukuna"].includes(player.character))) {
       player.energy = Math.min(100, player.energy + .018);
     }
 
@@ -343,6 +394,20 @@ class AuthoritativeMatch {
       player.attack = null;
       player.vx = 0;
       player.vy = 0;
+      return;
+    }
+
+    if (input.fuga && !player.attack) this.startFuga(player);
+    if (this.updateChargedSpecial(player, opponent, input)) {
+      player.vx = 0;
+      player.vy += 1800 / TICK_RATE;
+      player.y += player.vy / TICK_RATE;
+      if (player.y >= GROUND) {
+        player.y = GROUND;
+        player.vy = 0;
+        player.grounded = true;
+        player.jumps = 1;
+      }
       return;
     }
 
@@ -383,13 +448,15 @@ class AuthoritativeMatch {
           player.dashCooldown = 15;
           player.invuln = 6;
         }
-        if (!player.attack && input.jump && player.grounded) {
+        if (!player.attack && input.jump && (player.grounded || player.jumps > 0)) {
+          if (!player.grounded) player.jumps--;
           player.vy = -680;
           player.grounded = false;
         }
         if (!player.attack) {
           if (input.light) this.startAttack(player, "light");
           else if (input.heavy) this.startAttack(player, "heavy");
+          else if (input.fuga) this.startFuga(player);
           else if (input.special) this.startSpecial(player, input.special);
           else if (input.domain) this.startDomain(player, opponent);
           else if (input.awaken && player.energy >= 40) {
@@ -410,6 +477,7 @@ class AuthoritativeMatch {
       player.y = GROUND;
       player.vy = 0;
       player.grounded = true;
+      player.jumps = 1;
     }
     if (Math.abs(opponent.x - player.x) > 18 && !input.move) player.facing = opponent.x > player.x ? 1 : -1;
   }
@@ -437,13 +505,118 @@ class AuthoritativeMatch {
     }
   }
 
+  updateChargedSpecial(player, opponent, input) {
+    const supportsCharge = ["gojo", "sukuna"].includes(player.character);
+    if (!supportsCharge) return false;
+    const cost = player.character === "sukuna" ? 32 : 26;
+    if (input.specialHeld === "red" && player.chargedSpecialTicks <= 0
+      && player.chargedReleaseTicks < 0 && !player.attack && player.cooldowns.red <= 0
+      && player.energy >= cost && player.moveConfiscationTicks <= 0 && player.stun <= 0) {
+      player.chargedSpecialTicks = 1;
+    } else if (input.specialHeld === "red" && player.chargedSpecialTicks > 0 && player.chargedReleaseTicks < 0) {
+      player.chargedSpecialTicks = Math.min(300, player.chargedSpecialTicks + 1);
+    }
+    if (player.chargedSpecialTicks <= 0) return false;
+    if ((input.specialRelease === "red" || player.chargedSpecialTicks >= 300) && player.chargedReleaseTicks < 0) {
+      player.chargedReleaseTicks = 30;
+    }
+    if (player.chargedReleaseTicks >= 0) {
+      player.chargedReleaseTicks--;
+      if (player.chargedReleaseTicks <= 0) this.fireChargedSpecial(player, opponent);
+    }
+    return player.chargedSpecialTicks > 0;
+  }
+
+  fireChargedSpecial(player, opponent) {
+    const ratio = clamp(player.chargedSpecialTicks / 300, 0, 1);
+    player.chargedSpecialTicks = 0;
+    player.chargedReleaseTicks = -1;
+    if (player.character === "gojo") {
+      player.energy -= 26;
+      player.cooldowns.red = CHARACTER.gojo.specials.red.cooldown;
+      this.projectiles.push({
+        id: `${player.slot}-${this.tick}-charged-red`,
+        owner: player.slot, kind: "red",
+        x: player.x + player.facing * 52, y: player.y - 80,
+        vx: player.facing * (510 + ratio * 620), vy: 0, life: 90,
+        damage: 18 + ratio * 18, radius: 23 - ratio * 10,
+        strong: true, reflected: false,
+      });
+      player.attack = {
+        kind: "red", startTick: this.tick, activeTick: this.tick,
+        endActiveTick: this.tick, endTick: this.tick + 35,
+        damage: 0, range: 0, strong: false, hit: true,
+      };
+      this.events.push({ kind: "specialCast", slot: player.slot, technique: "red", charge: ratio, tick: this.tick });
+      return;
+    }
+
+    player.energy -= 32;
+    player.cooldowns.red = CHARACTER.sukuna.specials.red.cooldown;
+    player.dismantleUses++;
+    this.updateWorldSlashUnlock(player);
+    const count = 1 + Math.floor(ratio * 5);
+    const damage = 15 * (.8 - ratio * .5);
+    const doubleJump = !player.grounded && player.jumps === 0;
+    const singleJump = !player.grounded && !doubleJump;
+    for (let i = 0; i < count; i++) {
+      const targetX = doubleJump ? opponent.x : player.x + player.facing * (100 + i * 28);
+      const targetY = doubleJump ? opponent.y - 46 : singleJump ? GROUND - 10 : player.y - 72 + (i % 2 ? 18 : -12);
+      const dx = targetX - (player.x + player.facing * 55);
+      const dy = targetY - (player.y - 72);
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      this.projectiles.push({
+        id: `${player.slot}-${this.tick}-charged-dismantle-${i}`,
+        owner: player.slot, kind: "dismantle",
+        x: player.x + player.facing * 55, y: player.y - 72,
+        vx: singleJump ? 0 : dx / distance * 760,
+        vy: singleJump ? 900 : dy / distance * 760,
+        life: 52 + i * 2, damage, radius: 28,
+        strong: false, reflected: false,
+      });
+    }
+    player.attack = {
+      kind: "dismantle", startTick: this.tick, activeTick: this.tick,
+      endActiveTick: this.tick, endTick: this.tick + 33,
+      damage: 0, range: 0, strong: false, hit: true,
+    };
+    this.events.push({ kind: "specialCast", slot: player.slot, technique: "dismantleBarrage", count, charge: ratio, tick: this.tick });
+  }
+
+  startFuga(player) {
+    if (player.character !== "sukuna" || player.energy < 70 || player.cooldowns.red > 0
+      || player.cooldowns.blue > 0 || player.moveConfiscationTicks > 0) return;
+    player.chargedSpecialTicks = 0;
+    player.chargedReleaseTicks = -1;
+    player.energy -= 70;
+    player.cooldowns.red = 720;
+    player.cooldowns.blue = 720;
+    player.fugaTicks = 159;
+    player.fugaFired = false;
+    player.invuln = 159;
+    player.vx = 0;
+    player.attack = {
+      kind: "fuga", startTick: this.tick, activeTick: this.tick + 99,
+      endActiveTick: this.tick + 135, endTick: this.tick + 159,
+      damage: 0, range: 0, strong: true, hit: true, moveSpeed: 0,
+    };
+    this.events.push({ kind: "fugaStart", slot: player.slot, tick: this.tick });
+  }
+
   startSpecial(player, name) {
-    let move = CHARACTER[player.character].specials[name];
+    if (player.moveConfiscationTicks > 0) return;
+    let move = { ...CHARACTER[player.character].specials[name] };
     if (player.character === "sukuna" && name === "purple" && !player.worldSlashUnlocked) return;
+    if (player.character === "sukuna" && name === "purple" && player.worldSlashUses >= 2) return;
     if (player.character === "hakari" && player.jackpotTicks > 0 && name === "blue") {
       move = { cost: 10, cooldown: 660, kind: "gamblersLuck", damage: 22 };
     } else if (player.character === "hakari" && player.jackpotTicks > 0 && name === "purple") {
       move = { cost: 8, cooldown: 540, kind: "feverBreaker", damage: 20 };
+    }
+    const enhancedCleave = player.character === "sukuna" && name === "blue" && player.energy > 50;
+    if (enhancedCleave) {
+      move.damage *= 1.65;
+      move.cooldown = 600;
     }
     if (!move || player.cooldowns[name] > 0 || player.energy < move.cost) return;
     if (move.requiresPurple && player.unstablePurpleTicks <= 0) return;
@@ -453,11 +626,63 @@ class AuthoritativeMatch {
     player.dashTicks = 0;
     if (player.character === "sukuna" && name === "red") player.dismantleUses++;
     if (player.character === "sukuna" && name === "blue") player.cleaveUses++;
+    if (player.character === "sukuna" && name === "purple") player.worldSlashUses++;
     this.updateWorldSlashUnlock(player);
     this.events.push({
       kind: "specialCast", slot: player.slot, technique: move.kind,
       x: player.x, y: player.y - 72, facing: player.facing, tick: this.tick,
     });
+    if (move.kind === "roughPunch") {
+      const doorIndex = this.projectiles.findIndex((projectile) =>
+        projectile.owner === player.slot && projectile.kind === "door" && Math.abs(projectile.x - player.x) < 190
+      );
+      if (doorIndex >= 0) {
+        const door = this.projectiles.splice(doorIndex, 1)[0];
+        Object.assign(door, {
+          id: `${player.slot}-${this.tick}-launched-door`,
+          vx: player.facing * 760, vy: -40, life: 75,
+          damage: 34, radius: 34, strong: true, launchedDoor: true,
+        });
+        this.projectiles.push(door);
+        player.cooldowns.red = Math.max(player.cooldowns.red, 480);
+        player.cooldowns.blue = Math.max(player.cooldowns.blue, 600);
+        player.attack = {
+          kind: "roughPunch", startTick: this.tick, activeTick: this.tick + 6,
+          endActiveTick: this.tick + 16, endTick: this.tick + 34,
+          damage: 0, range: 0, strong: true, hit: true,
+        };
+        this.events.push({ kind: "shutterBreaker", slot: player.slot, tick: this.tick });
+        return;
+      }
+      if (!player.grounded) {
+        player.attack = {
+          kind: "roughDownkick", startTick: this.tick, activeTick: this.tick + 7,
+          endActiveTick: this.tick + 24, endTick: this.tick + 38,
+          damage: 24, range: 78, strong: true, hit: false,
+        };
+        player.vy = 900;
+        this.events.push({ kind: "roughDownkick", slot: player.slot, tick: this.tick });
+        return;
+      }
+    }
+    if (move.kind === "blue" && !player.grounded && player.jumps === 0) {
+      const opponent = this.players[player.slot === 1 ? 2 : 1];
+      const damage = Math.min(24, opponent.health);
+      opponent.x = player.x;
+      opponent.y = Math.min(opponent.y, player.y + 35);
+      opponent.vy = 920;
+      opponent.grounded = false;
+      opponent.stun = Math.max(opponent.stun, 44);
+      opponent.health = Math.max(0, opponent.health - damage);
+      player.damage += damage;
+      player.attack = {
+        kind: "blueSkyfall", startTick: this.tick, activeTick: this.tick + 8,
+        endActiveTick: this.tick + 34, endTick: this.tick + 49,
+        damage: 0, range: 0, strong: true, hit: true,
+      };
+      this.events.push({ kind: "blueSkyfall", slot: player.slot, targetSlot: opponent.slot, damage, tick: this.tick });
+      return;
+    }
     if (move.kind === "roughPunch" || move.kind === "cleave"
       || move.kind === "gamblersLuck" || move.kind === "feverBreaker") {
       player.attack = {
@@ -465,7 +690,7 @@ class AuthoritativeMatch {
         endActiveTick: this.tick + (move.kind === "gamblersLuck" ? 22 : 14),
         endTick: this.tick + (move.kind === "gamblersLuck" ? 48 : move.kind === "feverBreaker" ? 38 : 25),
         damage: move.damage,
-        range: move.kind === "gamblersLuck" ? 132 : 105,
+        range: move.kind === "gamblersLuck" ? 132 : enhancedCleave ? 148 : 105,
         strong: true, hit: false,
       };
       player.attack.moveSpeed = move.kind === "roughPunch"
@@ -508,7 +733,10 @@ class AuthoritativeMatch {
         : this.hakariRarity(player, "shutter");
     }
     if (move.kind === "dismantle") projectile.vx = direction * 760;
-    if (move.kind === "worldSlash") projectile.radius = 90;
+    if (move.kind === "worldSlash") {
+      projectile.vx = direction * 920;
+      projectile.radius = 90;
+    }
     if (player.character === "hakari" && player.domainTicks > 0 && move.kind === "reserveBall") {
       projectile.rarity = this.registerHakariRoll(player, "reserve");
     } else if (player.character === "hakari" && move.kind === "reserveBall") {
@@ -540,8 +768,9 @@ class AuthoritativeMatch {
   }
 
   startDomain(player, opponent) {
-    if (player.cooldowns.domain > 0 || player.energy < 100) return;
-    player.energy = 0;
+    if (player.cooldowns.domain > 0 || player.moveConfiscationTicks > 0) return;
+    if (player.character === "hakari" && player.energy < 100) return;
+    if (player.character === "hakari") player.energy = 0;
     player.vx = 0;
     player.vy = 0;
     player.attack = null;
@@ -574,8 +803,8 @@ class AuthoritativeMatch {
 
   updateWorldSlashUnlock(player) {
     const unlocked = player.character === "sukuna"
-      && player.dismantleUses >= 10
-      && player.cleaveUses >= 5
+      && player.dismantleUses >= 5
+      && player.cleaveUses >= 2
       && player.sukunaDomainUses >= 1;
     if (unlocked && !player.worldSlashUnlocked) {
       player.worldSlashUnlocked = true;
@@ -693,6 +922,15 @@ class AuthoritativeMatch {
 
   applyDamage(attacker, defender, damage, strong, source) {
     if (defender.invuln > 0) return;
+    if (defender.chargedSpecialTicks > 0) {
+      if (defender.character === "gojo") defender.energy = Math.max(0, defender.energy - 30);
+      if (defender.character === "sukuna") {
+        defender.cooldowns.red = Math.max(defender.cooldowns.red, Math.ceil(CHARACTER.sukuna.specials.red.cooldown / 2));
+      }
+      defender.chargedSpecialTicks = 0;
+      defender.chargedReleaseTicks = -1;
+      this.events.push({ kind: "chargedMoveInterrupted", slot: defender.slot, tick: this.tick });
+    }
     if (defender.blocking) {
       if (this.tick - defender.blockStartTick <= 6) {
         defender.parries++;
@@ -764,6 +1002,10 @@ class AuthoritativeMatch {
           continue;
         }
         this.applyDamage(owner, target, projectile.damage, projectile.strong, projectile.kind);
+        if (projectile.burns) {
+          target.burned = true;
+          this.events.push({ kind: "fugaImpact", slot: target.slot, sourceSlot: owner.slot, tick: this.tick });
+        }
         if (!["purple", "worldSlash"].includes(projectile.kind)) projectile.life = 0;
       }
       if (projectile.kind === "blue" && distance < 75 && this.tick % 23 === 0) {
@@ -833,7 +1075,7 @@ class AuthoritativeMatch {
 
   checkResult() {
     if (this.result) return;
-    const remainingTicks = Math.max(0, this.settings.time * TICK_RATE - this.tick);
+    const remainingTicks = Math.max(0, this.settings.time * TICK_RATE - this.roundTicks);
     const p1 = this.players[1];
     const p2 = this.players[2];
     if (p1.health > 0 && p2.health > 0 && remainingTicks > 0) return;
@@ -883,6 +1125,11 @@ class AuthoritativeMatch {
       cleaveUses: player.cleaveUses,
       sukunaDomainUses: player.sukunaDomainUses,
       worldSlashUnlocked: player.worldSlashUnlocked,
+      worldSlashUses: player.worldSlashUses,
+      chargedSpecialTicks: player.chargedSpecialTicks,
+      chargedReleaseTicks: player.chargedReleaseTicks,
+      moveConfiscationTicks: player.moveConfiscationTicks,
+      fugaTicks: player.fugaTicks,
       hakariRollInputs: player.hakariRollInputs,
       hakariLastRarity: player.hakariLastRarity,
       hakariRollAttempts: player.hakariRollAttempts,
@@ -892,7 +1139,7 @@ class AuthoritativeMatch {
       tick: this.tick,
       serverTime: this.startAt + this.tick * TICK_MS,
       startAt: this.startAt,
-      remainingTicks: Math.max(0, this.settings.time * TICK_RATE - this.tick),
+      remainingTicks: Math.max(0, this.settings.time * TICK_RATE - this.roundTicks),
       players: { 1: serializePlayer(this.players[1]), 2: serializePlayer(this.players[2]) },
       projectiles: this.projectiles.map((projectile) => ({ ...projectile })),
       clash: this.clash ? { ...this.clash } : null,
