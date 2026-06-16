@@ -180,6 +180,9 @@
   function handleMessage(message) {
     if (message.type === "error") {
       showError(message.message);
+      if (/FIGHTER|CHARACTER|RESTART/i.test(String(message.message || ""))) {
+        window.dispatchEvent(new CustomEvent("voidlimit:characterRejected", { detail: { message: message.message } }));
+      }
     } else if (message.type === "joined") {
       state.token = message.token;
       state.slot = message.slot;
