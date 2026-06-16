@@ -47,6 +47,16 @@ const CHARACTER = {
       purple: { cost: 14, cooldown: 252, kind: "reserveBall", damage: 30 },
     },
   },
+  higuruma: {
+    speed: 306,
+    light: [6.2, 7.2, 8.4, 9.4, 14.2],
+    heavy: 16,
+    specials: {
+      red: { cost: 18, cooldown: 270, kind: "gavel", damage: 15 },
+      blue: { cost: 22, cooldown: 360, kind: "gavelHook", damage: 10 },
+      purple: { cost: 55, cooldown: 720, kind: "gavelSentence", damage: 45 },
+    },
+  },
 };
 
 function normalizeInput(raw = {}) {
@@ -514,9 +524,9 @@ class AuthoritativeMatch {
   }
 
   updateChargedSpecial(player, opponent, input) {
-    const supportsCharge = ["gojo", "sukuna"].includes(player.character);
+    const supportsCharge = ["gojo", "sukuna", "higuruma"].includes(player.character);
     if (!supportsCharge) return false;
-    const cost = player.character === "sukuna" ? 16 : 26;
+    const cost = CHARACTER[player.character].specials.red.cost;
     if (input.specialHeld === "red" && player.chargedSpecialTicks <= 0
       && player.chargedReleaseTicks < 0 && !player.attack && player.cooldowns.red <= 0
       && player.energy >= cost && player.moveConfiscationTicks <= 0 && player.stun <= 0) {
@@ -527,6 +537,10 @@ class AuthoritativeMatch {
     if (player.chargedSpecialTicks <= 0) return false;
     if (input.specialRelease === "red" && player.chargedSpecialTicks <= 18 && player.chargedReleaseTicks < 0) {
       this.fireQuickSpecial(player, opponent);
+      return false;
+    }
+    if (player.character === "higuruma" && (input.specialRelease === "red" || player.chargedSpecialTicks >= 300) && player.chargedReleaseTicks < 0) {
+      this.fireChargedSpecial(player, opponent);
       return false;
     }
     if ((input.specialRelease === "red" || player.chargedSpecialTicks >= 300) && player.chargedReleaseTicks < 0) {
@@ -596,6 +610,17 @@ class AuthoritativeMatch {
   fireQuickSpecial(player, opponent) {
     player.chargedSpecialTicks = 0;
     player.chargedReleaseTicks = -1;
+    if (player.character === "higuruma") {
+      player.energy -= CHARACTER.higuruma.specials.red.cost;
+      player.cooldowns.red = CHARACTER.higuruma.specials.red.cooldown;
+      player.attack = {
+        kind: "gavel", startTick: this.tick, activeTick: this.tick + 6,
+        endActiveTick: this.tick + 14, endTick: this.tick + 25,
+        damage: 15, range: 78, strong: false, hit: false,
+      };
+      this.events.push({ kind: "specialCast", slot: player.slot, technique: "gavel", charge: 0, tick: this.tick });
+      return;
+    }
     if (player.character === "gojo") {
       player.energy -= 26;
       player.cooldowns.red = CHARACTER.gojo.specials.red.cooldown;
@@ -632,6 +657,17 @@ class AuthoritativeMatch {
     const ratio = clamp(player.chargedSpecialTicks / 300, 0, 1);
     player.chargedSpecialTicks = 0;
     player.chargedReleaseTicks = -1;
+    if (player.character === "higuruma") {
+      player.energy -= CHARACTER.higuruma.specials.red.cost;
+      player.cooldowns.red = CHARACTER.higuruma.specials.red.cooldown;
+      player.attack = {
+        kind: "chargedGavel", startTick: this.tick, activeTick: this.tick + 11,
+        endActiveTick: this.tick + 24, endTick: this.tick + 38,
+        damage: 28, range: 135, strong: true, hit: false,
+      };
+      this.events.push({ kind: "specialCast", slot: player.slot, technique: "chargedGavel", charge: ratio, tick: this.tick });
+      return;
+    }
     if (player.character === "gojo") {
       player.energy -= 26;
       player.cooldowns.red = CHARACTER.gojo.specials.red.cooldown;
@@ -701,6 +737,15 @@ class AuthoritativeMatch {
       move = { cost: 10, cooldown: 660, kind: "gamblersLuck", damage: 22 };
     } else if (player.character === "hakari" && player.jackpotTicks > 0 && name === "purple") {
       move = { cost: 8, cooldown: 540, kind: "feverBreaker", damage: 20 };
+    } else if (player.character === "higuruma" && name === "blue") {
+      const opponent = this.players[player.slot === 1 ? 2 : 1];
+      if (!player.grounded) {
+        move = { cost: 22, cooldown: 360, kind: "gavelAirSlam", damage: 18 };
+      } else if (Math.abs(opponent.x - player.x) <= 108) {
+        move = { cost: 22, cooldown: 360, kind: "gavelThrow", damage: 16 };
+      } else {
+        move = { cost: 22, cooldown: 360, kind: "gavelHookPull", damage: 10 };
+      }
     }
     const enhancedCleave = player.character === "sukuna" && name === "blue" && player.energy > 50;
     if (enhancedCleave) {
@@ -773,14 +818,22 @@ class AuthoritativeMatch {
       return;
     }
     if (move.kind === "roughPunch" || move.kind === "cleave"
-      || move.kind === "gamblersLuck" || move.kind === "feverBreaker") {
+      || move.kind === "gamblersLuck" || move.kind === "feverBreaker"
+      || ["gavel", "gavelHookPull", "gavelThrow", "gavelAirSlam", "gavelSentence"].includes(move.kind)) {
+      const gavelRanges = {
+        gavel: 78,
+        gavelHookPull: 225,
+        gavelThrow: 112,
+        gavelAirSlam: 82,
+        gavelSentence: 156,
+      };
       player.attack = {
         kind: move.kind, startTick: this.tick, activeTick: this.tick + 8,
-        endActiveTick: this.tick + (move.kind === "gamblersLuck" ? 22 : 14),
-        endTick: this.tick + (move.kind === "gamblersLuck" ? 48 : move.kind === "feverBreaker" ? 38 : 25),
+        endActiveTick: this.tick + (move.kind === "gamblersLuck" ? 22 : move.kind === "gavelSentence" ? 34 : 14),
+        endTick: this.tick + (move.kind === "gamblersLuck" ? 48 : move.kind === "feverBreaker" ? 38 : move.kind === "gavelSentence" ? 53 : 25),
         damage: move.damage,
-        range: move.kind === "gamblersLuck" ? 132 : enhancedCleave ? 148 : 105,
-        strong: true, hit: false,
+        range: gavelRanges[move.kind] || (move.kind === "gamblersLuck" ? 132 : enhancedCleave ? 148 : 105),
+        strong: move.kind === "gavel" ? false : true, hit: false,
       };
       player.attack.moveSpeed = move.kind === "roughPunch"
         ? (player.jackpotTicks > 0 ? 620 : 490)
@@ -858,6 +911,7 @@ class AuthoritativeMatch {
 
   startDomain(player, opponent) {
     if (player.cooldowns.domain > 0 || player.moveConfiscationTicks > 0) return;
+    if (!["gojo", "sukuna", "hakari"].includes(player.character)) return;
     if (player.character === "hakari" && player.energy < 100) return;
     if (player.character === "hakari") player.energy = 0;
     player.vx = 0;
@@ -990,6 +1044,28 @@ class AuthoritativeMatch {
         defender.stun = Math.max(defender.stun, 40);
         attacker.pendingFollowup = { kind: "gamblersLuck", target: defender.slot, tick: this.tick + 24 };
         this.events.push({ kind: "gamblersLuckGrind", slot: defender.slot, sourceSlot: attacker.slot, tick: this.tick });
+      } else if (attack.kind === "gavelHookPull") {
+        defender.x = clamp(attacker.x + attacker.facing * 66, 26, 1254);
+        defender.vx = -attacker.facing * 420;
+        defender.stun = Math.max(defender.stun, 33);
+        this.events.push({ kind: "gavelHookPull", slot: defender.slot, sourceSlot: attacker.slot, tick: this.tick });
+      } else if (attack.kind === "gavelThrow") {
+        defender.x = clamp(attacker.x - attacker.facing * 72, 26, 1254);
+        defender.vx = -attacker.facing * 520;
+        defender.vy = -120;
+        defender.grounded = false;
+        defender.stun = Math.max(defender.stun, 41);
+        this.events.push({ kind: "gavelThrow", slot: defender.slot, sourceSlot: attacker.slot, tick: this.tick });
+      } else if (attack.kind === "gavelAirSlam") {
+        defender.vy = 760;
+        defender.grounded = false;
+        defender.stun = Math.max(defender.stun, 38);
+        this.events.push({ kind: "gavelAirSlam", slot: defender.slot, sourceSlot: attacker.slot, tick: this.tick });
+      } else if (attack.kind === "gavelSentence") {
+        defender.vy = 820;
+        defender.grounded = false;
+        defender.stun = Math.max(defender.stun, 54);
+        this.events.push({ kind: "gavelSentence", slot: defender.slot, sourceSlot: attacker.slot, tick: this.tick });
       }
     }
   }
@@ -1016,6 +1092,9 @@ class AuthoritativeMatch {
       if (defender.character === "gojo") defender.energy = Math.max(0, defender.energy - 30);
       if (defender.character === "sukuna") {
         defender.cooldowns.red = Math.max(defender.cooldowns.red, Math.ceil(CHARACTER.sukuna.specials.red.cooldown / 2));
+      }
+      if (defender.character === "higuruma") {
+        defender.cooldowns.red = Math.max(defender.cooldowns.red, Math.ceil(CHARACTER.higuruma.specials.red.cooldown / 2));
       }
       defender.chargedSpecialTicks = 0;
       defender.chargedReleaseTicks = -1;
@@ -1144,17 +1223,18 @@ class AuthoritativeMatch {
     }
     this.clash.power = clamp(this.clash.power, 0, 100);
     if (this.clash.ticks <= 0 || this.clash.power <= 0 || this.clash.power >= 100) {
+      const domainClash = this.clash.type === "domain";
       const winner = this.clash.power >= 50 ? this.players[1] : this.players[2];
       const loser = winner.slot === 1 ? this.players[2] : this.players[1];
-      if (winner.character === "hakari") {
+      if (domainClash && winner.character === "hakari") {
         winner.jackpotTicks = 2280;
         winner.energy = 100;
         winner.domainTicks = 0;
-      } else {
+      } else if (domainClash) {
         winner.domainTicks = winner.character === "gojo" ? 720 : winner.character === "sukuna" ? 900 : 3600;
         winner.domainElapsedTicks = 0;
       }
-      loser.domainTicks = 0;
+      if (domainClash) loser.domainTicks = 0;
       winner.domainStartupTicks = 0;
       winner.pendingDomainTicks = 0;
       loser.domainStartupTicks = 0;
