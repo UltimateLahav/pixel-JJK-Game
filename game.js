@@ -95,6 +95,7 @@
   let pendingOfflineSelection = false;
   let onlineSelection = false;
   let selectionLocked = false;
+  let onlineLockRequest = null;
   let audioCtx = null;
   let master = null;
   let lastTime = performance.now();
@@ -534,6 +535,7 @@
     onlineSelection = Boolean(options.online);
     pendingOfflineSelection = !onlineSelection;
     selectionLocked = false;
+    onlineLockRequest = null;
     selectedCharacter = options.character && characters[options.character] ? options.character : selectedCharacter;
     ui.characterSelect.classList.remove("hidden");
     ui.menu.classList.add("hidden");
@@ -570,11 +572,24 @@
     }
     const local = room.players.find((entry) => entry.slot === localSlot);
     const remote = room.players.find((entry) => entry.slot !== localSlot);
+    if (local?.character && characters[local.character] && (!onlineLockRequest || local.character === onlineLockRequest.character || local.locked)) {
+      selectedCharacter = local.character;
+      renderCharacterSelection();
+    }
     if (local?.locked) {
+      onlineLockRequest = null;
       selectionLocked = true;
       ui.confirmCharacter.disabled = true;
       ui.confirmCharacter.textContent = "LOCKED";
       ui.selectionStatus.textContent = remote?.locked ? "BOTH FIGHTERS LOCKED" : "WAITING FOR OPPONENT...";
+    } else if (onlineLockRequest) {
+      ui.confirmCharacter.disabled = true;
+      ui.confirmCharacter.textContent = "LOCKING...";
+      ui.selectionStatus.textContent = `LOCKING ${characters[onlineLockRequest.character]?.name || "FIGHTER"}...`;
+    } else {
+      selectionLocked = false;
+      ui.confirmCharacter.disabled = false;
+      ui.confirmCharacter.textContent = "LOCK IN";
     }
   }
 
@@ -612,18 +627,28 @@
 
   function confirmCharacterSelection() {
     if (selectionLocked) return;
+    const activeCard = document.querySelector(`.character-card[data-character="${selectedCharacter}"]`);
+    if (onlineSelection) {
+      onlineLockRequest = { character: selectedCharacter, startedAt: performance.now() };
+      ui.confirmCharacter.disabled = true;
+      ui.confirmCharacter.textContent = "LOCKING...";
+      ui.selectionStatus.textContent = `LOCKING ${characters[selectedCharacter]?.name || "FIGHTER"}...`;
+      window.dispatchEvent(new CustomEvent("voidlimit:characterLocked", { detail: { character: selectedCharacter } }));
+      setTimeout(() => {
+        if (!onlineSelection || selectionLocked || onlineLockRequest?.character !== selectedCharacter) return;
+        onlineLockRequest = null;
+        ui.confirmCharacter.disabled = false;
+        ui.confirmCharacter.textContent = "LOCK IN";
+        ui.selectionStatus.textContent = "SERVER DID NOT CONFIRM. RESTART start-online.bat, THEN TRY AGAIN.";
+      }, 1600);
+      return;
+    }
     selectionLocked = true;
     ui.confirmCharacter.disabled = true;
     ui.confirmCharacter.textContent = "LOCKED";
-    const activeCard = document.querySelector(`.character-card[data-character="${selectedCharacter}"]`);
     activeCard?.classList.add("locked");
     ui.selectionP1.classList.add("locked");
     ui.selectionP1.querySelector("small").textContent = "LOCKED";
-    if (onlineSelection) {
-      ui.selectionStatus.textContent = "WAITING FOR OPPONENT...";
-      window.dispatchEvent(new CustomEvent("voidlimit:characterLocked", { detail: { character: selectedCharacter } }));
-      return;
-    }
     ui.selectionStatus.textContent = "FIGHTER LOCKED";
     ui.characterSelect.classList.add("hidden");
     configureVersus({
@@ -5781,6 +5806,14 @@
     ui.characterSelect.classList.add("hidden");
     quitToMenu();
   }
+
+  window.addEventListener("voidlimit:characterRejected", (event) => {
+    if (!onlineSelection || selectionLocked) return;
+    onlineLockRequest = null;
+    ui.confirmCharacter.disabled = false;
+    ui.confirmCharacter.textContent = "LOCK IN";
+    ui.selectionStatus.textContent = event.detail?.message || "CHARACTER WAS NOT ACCEPTED BY SERVER";
+  });
 
   window.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
