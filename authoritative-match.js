@@ -83,32 +83,41 @@ const TRIAL_CRIMES = {
 };
 
 const TRIAL_DIALOGUE = [
-  { id: "admit", text: "I admit it." },
-  { id: "selfDefense", text: "That was self-defense." },
-  { id: "noChoice", text: "I had no choice." },
-  { id: "noProof", text: "You have no proof." },
-  { id: "systemBlame", text: "The jujutsu world made me do it." },
-  { id: "protecting", text: "I was protecting someone." },
-  { id: "rejectCourt", text: "I do not recognize this court." },
-  { id: "necessary", text: "The damage was necessary." },
-  { id: "regret", text: "I regret what happened." },
-  { id: "silent", text: "I will say nothing." },
+  { id: "admit", text: "I admit it.", risk: "HONEST", icon: "paper", hint: "Strong for smaller charges. Bad if the crime is severe." },
+  { id: "selfDefense", text: "That was self-defense.", risk: "SAFE", icon: "shield", hint: "Good for battle claims. Bad for civilians or possession." },
+  { id: "noChoice", text: "I had no choice.", risk: "SAFE", icon: "paper", hint: "Useful when survival or force is believable." },
+  { id: "noProof", text: "You have no proof.", risk: "DENIAL", icon: "mask", hint: "Strong against weak evidence. Dangerous against strong evidence." },
+  { id: "systemBlame", text: "The jujutsu world made me do it.", risk: "RISKY", icon: "paper", hint: "Better for people hurt by jujutsu society." },
+  { id: "protecting", text: "I was protecting someone.", risk: "SAFE", icon: "shield", hint: "Good for heroic motives. Weak for cruel characters." },
+  { id: "rejectCourt", text: "I do not recognize this court.", risk: "AGGRESSIVE", icon: "warning", hint: "Disrespectful. Only intimidation can make it work." },
+  { id: "necessary", text: "The damage was necessary.", risk: "RISKY", icon: "warning", hint: "Good for battlefield damage. Bad for murder charges." },
+  { id: "regret", text: "I regret what happened.", risk: "HONEST", icon: "tear", hint: "Good for guilty characters. Bad for arrogant ones." },
+  { id: "silent", text: "I will say nothing.", risk: "SAFE", icon: "mask", hint: "Low risk, but it gives almost no defense." },
 ];
 
 const TRIAL_ARGUMENTS = [
-  { id: "contradict", text: "Contradict the testimony." },
-  { id: "evidence", text: "Use Judgeman's evidence." },
-  { id: "motive", text: "Attack their motive." },
-  { id: "violence", text: "Expose their violence." },
-  { id: "falseDefense", text: "Argue self-defense is false." },
-  { id: "unnecessary", text: "Argue the damage was unnecessary." },
-  { id: "past", text: "Use their past actions against them." },
-  { id: "confiscation", text: "Push for Confiscation." },
-  { id: "deathPenalty", text: "Push for Death Penalty." },
-  { id: "mercy", text: "Show mercy and ask for a lighter verdict." },
+  { id: "contradict", text: "Contradict the testimony.", risk: "SHARP", icon: "mask", hint: "Targets lies, denial, and silence." },
+  { id: "evidence", text: "Use Judgeman's evidence.", risk: "SAFE", icon: "paper", hint: "Best when evidence is strong." },
+  { id: "motive", text: "Attack their motive.", risk: "RISKY", icon: "warning", hint: "Targets selfish or weak excuses." },
+  { id: "violence", text: "Expose their violence.", risk: "AGGRESSIVE", icon: "warning", hint: "Stronger for severe violent crimes." },
+  { id: "falseDefense", text: "Argue self-defense is false.", risk: "SHARP", icon: "shield", hint: "Targets self-defense claims." },
+  { id: "unnecessary", text: "Argue the damage was unnecessary.", risk: "SHARP", icon: "paper", hint: "Targets damage and destruction charges." },
+  { id: "past", text: "Use their past actions against them.", risk: "RISKY", icon: "mask", hint: "Stronger against repeat violent offenders." },
+  { id: "confiscation", text: "Push for Confiscation.", risk: "SAFE", icon: "chain", hint: "Aims for a practical punishment." },
+  { id: "deathPenalty", text: "Push for Death Penalty.", risk: "AGGRESSIVE", icon: "sword", hint: "Only strong when the case is severe." },
+  { id: "mercy", text: "Show mercy and ask for a lighter verdict.", risk: "SAFE", icon: "tear", hint: "Lowers punishment, but can win narrow cases." },
 ];
 
 const isSevereTrialCrime = (crime = "") => /murder|mass murder|possess|killing|mutilating|civilians/i.test(crime);
+
+function trialChargeLine(character, crime) {
+  if (/mass murder|murder|killing|mutilating/i.test(crime)) return "THE COURT PRESENTS A BLOOD-STAINED CHARGE.";
+  if (/property|damage|destruction/i.test(crime)) return "THE COURT PRESENTS THE DAMAGE REPORT.";
+  if (/gambling|fight club|betting/i.test(crime)) return "THE COURT PRESENTS ILLEGAL WAGERS.";
+  if (/possess/i.test(crime)) return "THE COURT PRESENTS A BODY WITHOUT CONSENT.";
+  if (character === "higuruma") return "THE COURT KNOWS ITS OWN REFLECTION.";
+  return "THE COURT PRESENTS THE CHARGE.";
+}
 
 function normalizeInput(raw = {}) {
   const special = ["red", "blue", "purple"].includes(raw.special) ? raw.special : "";
@@ -1088,6 +1097,8 @@ class AuthoritativeMatch {
     if (targetCharacter === "hakari" && /gambling|fight club/i.test(crime)) prosecutor += 8;
     if (targetCharacter === "higuruma" && /killing|judgment|Culling/i.test(crime)) prosecutor += 10;
 
+    prosecutor += Number(trial.prosecutorBonus || 0);
+    defense += Number(trial.defenseBonus || 0);
     const delta = Math.round(prosecutor + severity - defense);
     let verdict = "MISTRIAL";
     let punishment = "none";
@@ -1127,10 +1138,15 @@ class AuthoritativeMatch {
       argumentOptions: [],
       dialogue: null,
       argument: null,
-      timer: 84,
-      maxTimer: 84,
+      timer: 180,
+      maxTimer: 180,
       verdict: "",
       punishment: "none",
+      line: trialChargeLine(targetCharacter, crime),
+      prosecutorBonus: 0,
+      defenseBonus: 0,
+      baseProsecutor: 0,
+      baseDefense: 0,
     };
     player.vx = 0;
     player.vy = 0;
@@ -1140,7 +1156,8 @@ class AuthoritativeMatch {
     opponent.attack = null;
     this.events.push({
       kind: "trialCharge", casterSlot: player.slot, targetSlot: opponent.slot,
-      targetCharacter, crime, evidence, options, timerTicks: 480, tick: this.tick,
+      targetCharacter, crime, evidence, options, line: trialChargeLine(targetCharacter, crime),
+      chargeTicks: 180, timerTicks: 480, tick: this.tick,
     });
   }
 
@@ -1226,17 +1243,38 @@ class AuthoritativeMatch {
       if (choice >= 0 && choice < trial.argumentOptions.length) {
         trial.argument = trial.argumentOptions[choice];
         const score = this.calculateTrialScore(trial);
-        Object.assign(trial, score, { phase: "verdict", timer: 135, maxTimer: 135 });
-        this.applyTrialPunishment(trial, score);
+        Object.assign(trial, score, {
+          phase: "verdictClash",
+          timer: 180,
+          maxTimer: 180,
+          baseProsecutor: score.prosecutor,
+          baseDefense: score.defense,
+          prosecutorBonus: 0,
+          defenseBonus: 0,
+        });
         this.events.push({
           kind: "trialArgumentChoice", slot: caster.slot, choiceIndex: choice,
           choice: trial.argument, tick: this.tick,
         });
         this.events.push({
+          kind: "trialVerdictClash", casterSlot: caster.slot, targetSlot: target.slot,
+          prosecutor: score.prosecutor, defense: score.defense, timerTicks: 180, tick: this.tick,
+        });
+      }
+    } else if (trial.phase === "verdictClash") {
+      const casterInput = trial.casterSlot === 1 ? input1 : input2;
+      const targetInput = trial.targetSlot === 1 ? input1 : input2;
+      if (casterInput.move || casterInput.clash) trial.prosecutorBonus = Math.min(8, Number(trial.prosecutorBonus || 0) + .045);
+      if (targetInput.move || targetInput.clash) trial.defenseBonus = Math.min(8, Number(trial.defenseBonus || 0) + .045);
+      if (trial.timer <= 0) {
+        const score = this.calculateTrialScore(trial);
+        Object.assign(trial, score, { phase: "verdict", timer: 120, maxTimer: 120 });
+        this.applyTrialPunishment(trial, score);
+        this.events.push({
           kind: "trialVerdict", casterSlot: caster.slot, targetSlot: target.slot,
           verdict: score.verdict, punishment: score.punishment,
           evidence: score.evidence, defense: score.defense, prosecutor: score.prosecutor,
-          delta: score.delta, tick: this.tick,
+          delta: score.delta, prosecutorBonus: trial.prosecutorBonus, defenseBonus: trial.defenseBonus, tick: this.tick,
         });
       }
     } else if (trial.phase === "verdict" && trial.timer <= 0) {
@@ -1269,7 +1307,7 @@ class AuthoritativeMatch {
     const otherRecent = counterDomain || opponent.domainStartupTicks > 0;
     player.domainTicks = 0;
     player.pendingDomainTicks = player.character === "higuruma" ? -1 : player.character === "gojo" ? 720 : player.character === "sukuna" ? 900 : 3600;
-    player.domainStartupTicks = player.character === "higuruma" ? 90 : DOMAIN_STARTUP_TICKS;
+    player.domainStartupTicks = player.character === "higuruma" ? 120 : DOMAIN_STARTUP_TICKS;
     player.domainElapsedTicks = 0;
     if (player.character === "hakari") {
       player.hakariRollInputs = [];
