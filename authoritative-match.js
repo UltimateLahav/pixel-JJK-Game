@@ -10,7 +10,7 @@ const DOMAIN_STARTUP_TICKS = 141;
 const EMPTY_INPUT = Object.freeze({
   move: 0, jump: false, dash: false, block: false, charge: false,
   light: false, heavy: false, special: "", specialHeld: "", specialRelease: "",
-  fuga: false, domain: false, awaken: false,
+  fuga: false, domain: false, awaken: false, clash: 0,
 });
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -67,6 +67,7 @@ function normalizeInput(raw = {}) {
     fuga: Boolean(raw.fuga),
     domain: Boolean(raw.domain),
     awaken: Boolean(raw.awaken),
+    clash: clamp(Math.round(Number(raw.clash) || 0), -1, 1),
   };
 }
 
@@ -1130,8 +1131,9 @@ class AuthoritativeMatch {
     if (!this.clash) return;
     this.clash.ticks--;
     for (const [slot, input] of [[1, input1], [2, input2]]) {
-      if (!input.move || input.move === this.clash.last[slot]) continue;
-      this.clash.last[slot] = input.move;
+      const clashPress = input.clash || input.move;
+      if (!clashPress || clashPress === this.clash.last[slot]) continue;
+      this.clash.last[slot] = clashPress;
       this.clash.power += slot === 1 ? 2.8 : -2.8;
     }
     this.clash.power = clamp(this.clash.power, 0, 100);
