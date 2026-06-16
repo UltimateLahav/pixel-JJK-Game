@@ -1095,6 +1095,23 @@ canvas {
   font-weight: 700;
 }
 .ability-strip .locked { opacity: .35; }
+.ability-strip .confiscated {
+  opacity: .55;
+  border-color: #f2cf74;
+  box-shadow: inset 0 0 0 2px #3b2a0f, 0 0 14px #f2cf7444;
+}
+.ability-strip .confiscated::before {
+  content: "////";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #f2cf74;
+  font: 700 18px/1 Consolas, monospace;
+  letter-spacing: -2px;
+  text-shadow: 0 0 8px #000;
+  pointer-events: none;
+}
 .ability-strip [data-ability="purple"]:not(.locked) {
   border-color: #b478ff;
   box-shadow: 0 0 18px #8e52ff55;
