@@ -38,7 +38,6 @@
     heatMeter: $("#heatMeter"),
     heatValue: $("#heatValue"),
     heatHint: $("#heatHint"),
-    fControl: $("#fControl"),
     announcement: $("#announcement"),
     training: $("#trainingData"),
     resultTitle: $("#resultTitle"),
@@ -221,7 +220,6 @@
         ["E", "ROUGH CURSED PUNCH"],
         ["R", "SHUTTER DOORS"],
         ["Q", "RESERVE BALLS"],
-        ["F", "CONSECUTIVE EFFECT"],
         ["T", "IDLE DEATH GAMBLE"],
       ],
       labels: { red: "ROUGH PUNCH", blue: "SHUTTER", purple: "RESERVE BALLS", domain: "GAMBLE" },
@@ -1510,21 +1508,6 @@
     }
   }
 
-  function consecutiveEffect() {
-    const p = game.player;
-    if (!p || p.character !== "hakari" || p.stun > 0 || p.rewindWindow > 0) return;
-    if (p.cooldowns.consecutive > 0) return;
-    p.rewindX = p.x;
-    p.rewindY = p.y;
-    p.rewindHealth = p.health;
-    p.rewindWindow = p.jackpot > 0 || game.hakariDomain ? .72 : .44;
-    p.cooldowns.consecutive = p.jackpot > 0 ? 1.4 : game.hakariDomain ? 2.4 : 8.5;
-    p.heat = Math.min(100, p.heat + 6);
-    announce("CONSECUTIVE EFFECT");
-    spawnParticles(p.x, p.y - 55, "#5cff91", 18, 240, 5, .5);
-    tone(620, .18, "sine", .2, -250);
-  }
-
   function createUnstablePurple(blue, red) {
     const p = game.player;
     const x = (blue.x + red.x) / 2;
@@ -1867,29 +1850,6 @@
       line.volume = .5;
       speechSynthesis.speak(line);
     } catch {}
-  }
-
-  function awaken() {
-    const p = game.player;
-    if (p?.charging || p?.chargeRecovery > 0) return;
-    if (p?.character === "hakari") {
-      consecutiveEffect();
-      return;
-    }
-    const sukunaReady = p?.character === "sukuna" && p.damageDealt >= 55 && p.energy >= 40;
-    const gojoReady = p?.character !== "sukuna" && p.energy >= 50 && p.health <= p.maxHealth * .6;
-    if (!p || p.awakening > 0 || (!sukunaReady && !gojoReady)) return;
-    p.energy -= p.character === "sukuna" ? 40 : 50;
-    p.awakening = 12;
-    p.damageScale = p.character === "sukuna" ? 1.35 : 1.25;
-    if (p.character !== "sukuna") p.health = Math.min(p.maxHealth, p.health + 12);
-    p.invuln = 1.2;
-    game.cinematic = .9;
-    game.flash = .25;
-    game.shake = 12;
-    announce(p.character === "sukuna" ? "KING OF CURSES" : "THE HONORED ONE");
-    spawnParticles(p.x, p.y - 55, p.character === "sukuna" ? "#ff244f" : "#d8fbff", 45, 440, 7, .9);
-    tone(140, .7, "sine", .35, 540);
   }
 
   function enemyStartAttack(type = "light") {
@@ -2305,9 +2265,7 @@
     if (p.comboTimer <= 0) p.comboHits = 0;
     p.awakening = Math.max(0, p.awakening - dt);
     if (p.awakening <= 0) p.damageScale = 1;
-    p.canAwaken = p.character !== "hakari" && p.awakening <= 0 && (p.character === "sukuna"
-      ? p.damageDealt >= 55 && p.energy >= 40
-      : p.health <= p.maxHealth * .6 && p.energy >= 50);
+    p.canAwaken = false;
     for (const name of Object.keys(p.cooldowns)) p.cooldowns[name] = Math.max(0, p.cooldowns[name] - dt);
     const aggressionRegen = p.character === "sukuna" ? p.pressure * (p.awakening > 0 ? 1.7 : 1.05) : 0;
     const drainingOwnedDomain = game.domain > 0 && game.domainOwnerSlot === (game.online.active ? game.online.slot : 1)
@@ -3346,7 +3304,7 @@
       : p.awakening > 0
         ? `${p.character === "sukuna" ? "KING OF CURSES" : p.character === "hakari" ? "JACKPOT MODE" : "AWAKENED"} ${p.awakening.toFixed(1)}s`
         : p.burnout > 0 ? `BURNT OUT ${p.burnout.toFixed(1)}s`
-          : p.canAwaken ? "AWAKENING READY" : profile.title;
+          : profile.title;
     ui.playerState.textContent = p.charging
       ? `CHARGING CE ${p.energy.toFixed(0)}%`
       : p.techniqueCharge
@@ -3359,7 +3317,6 @@
       : p.chargeRecovery > 0
         ? `CHARGE RECOVERY ${p.chargeRecovery.toFixed(1)}s`
         : p.chargeCooldown > 0 ? `CHARGE COOLDOWN ${p.chargeCooldown.toFixed(1)}s` : normalPlayerState;
-    if (ui.fControl) ui.fControl.innerHTML = `<kbd>F</kbd> ${p.character === "hakari" ? "CONSECUTIVE EFFECT" : "AWAKEN"}`;
     ui.timer.textContent = game.mode === "training" ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
     ui.mode.textContent = game.mode.toUpperCase();
     ui.wave.textContent = game.online.active ? `P${game.online.slot} / ${Math.max(0, Math.round(game.online.startAt - Date.now())) > 0 ? "SYNC" : "LIVE"}`
@@ -3432,9 +3389,7 @@
         ? "R: GAMBLER'S LUCK / Q: FEVER BREAKER"
         : game.hakariDomain
           ? `${game.hakariDomain.displaySlots.join(" - ")} / TRY ${Math.min(5, game.hakariDomain.rollIndex + 1)}/5 / ODDS ${game.hakariDomain.chanceNumerator || 1}/239 / SETUP ${game.hakariDomain.rollInputs.length}/2${game.hakariDomain.lastRarity ? ` / ${game.hakariDomain.lastRarity.toUpperCase()}` : ""}`
-          : p.rewindWindow > 0
-            ? "CONSECUTIVE EFFECT ARMED"
-            : "DOMAIN ROLL REQUIRES 2 SHUTTERS / RESERVES";
+          : "DOMAIN ROLL REQUIRES 2 SHUTTERS / RESERVES";
     } else {
       ui.heatStatus.classList.add("hidden");
       ui.heatStatus.classList.remove("jackpot");
@@ -5447,7 +5402,7 @@
 
   window.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
-    if (["a", "d", "w", "s", "c", "q", "e", "r", "t", "f", "shift", "escape", "enter", " "].includes(key)) {
+    if (["a", "d", "w", "s", "c", "q", "e", "r", "t", "shift", "escape", "enter", " "].includes(key)) {
       event.preventDefault();
     }
     const firstPress = !keys.has(key);
@@ -5493,10 +5448,6 @@
     if (key === "t") {
       if (firstPress) queueOnlineEdge("domain");
       useAbility("domain");
-    }
-    if (key === "f") {
-      if (firstPress) queueOnlineEdge("awaken");
-      awaken();
     }
     if (key === "s" && game.player) game.player.guardStart = performance.now();
   });
