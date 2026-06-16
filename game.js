@@ -1646,6 +1646,14 @@
   function activateDomain() {
     const p = game.player;
     const profile = characterProfile(p);
+    const localSlot = game.online.active ? game.online.slot : 1;
+    const activeEnemyDomain = game.domain > 0
+      && !game.clash
+      && (
+        game.domainOwnerSlot > 0
+          ? game.domainOwnerSlot !== localSlot
+          : game.domainCharacter && game.domainCharacter !== p.character
+      );
     if (p.character === "sukuna") {
       p.sukunaDomainUses++;
       updateWorldSlashUnlock(p);
@@ -1654,6 +1662,23 @@
     p.attack = null;
     p.state = "domain";
     p.invuln = 2.4;
+    if (activeEnemyDomain) {
+      game.domainClashPending = true;
+      game.domainIntro = 0;
+      game.cinematic = 0;
+      game.domainStartup = 0;
+      game.windPaused = true;
+      if (game.online.active) {
+        game.online.stats.domains++;
+        game.online.localDomainWindow = 1.6;
+        sendOnline("event", { kind: "domain", character: p.character, counter: true });
+      }
+      beginClash("DOMAIN COLLISION", true);
+      if (game.clash) game.clash.counterDomain = true;
+      announce("DOMAIN CLASH");
+      tone(85, .5, "sawtooth", .25, 120);
+      return;
+    }
     game.domainIntro = 2.35;
     game.cinematic = 2.35;
     game.glitch = 1.15;
@@ -2637,7 +2662,9 @@
     const hakari = domain && game.player.character === "hakari";
     const opponentCharacter = game.online.active
       ? (game.online.remoteCharacter || game.enemy.character || "sukuna")
-      : game.player.character === "gojo" ? "sukuna" : "gojo";
+      : game.domain > 0 && game.domainOwnerSlot !== 1 && characters[game.domainCharacter]
+        ? game.domainCharacter
+        : game.player.character === "gojo" ? "sukuna" : "gojo";
     game.clash = {
       timer: domain ? 4 : 3.2,
       maxTimer: domain ? 4 : 3.2,
@@ -2717,6 +2744,7 @@
   function resolveClash(won) {
     const wasDomain = game.clash.domain;
     const hakariClash = game.clash.hakari;
+    const counterDomain = game.clash.counterDomain;
     game.clash = null;
     ui.clash.classList.add("hidden");
     ui.clash.classList.remove("domain-clash");
@@ -2730,7 +2758,12 @@
       game.enemy.vx = game.player.facing * 680;
       game.score += wasDomain ? 3500 : 1800;
       if (hakariClash) startJackpot(true);
-      else if (wasDomain) game.domain = 8;
+      else if (wasDomain) {
+        game.domain = 8;
+        game.domainCharacter = game.player.character;
+        game.domainOwnerSlot = game.online.active ? game.online.slot : 1;
+        game.domainTick = .5;
+      }
       spawnParticles(game.enemy.x, game.enemy.y - 55, "#65e9ff", 42, 560, 8, 1);
     } else {
       announce(hakariClash ? "GAMBLE OVERWHELMED" : "LIMIT BROKEN");
@@ -2738,7 +2771,7 @@
       game.player.stun = hakariClash ? 1.65 : 1.25;
       game.player.vx = -game.player.facing * 520;
       if (hakariClash) shatterHakariDomain(true);
-      else if (wasDomain) game.domain = 0;
+      else if (wasDomain && !counterDomain) game.domain = 0;
       spawnParticles(game.player.x, game.player.y - 55, "#ff4d7a", 40, 520, 8, 1);
     }
     tone(won ? 520 : 75, .45, "sawtooth", .3, won ? 360 : -30);
@@ -5334,6 +5367,11 @@
     } else if (event.kind === "domain") {
       game.online.remoteDomainWindow = 1.6;
       game.domainCharacter = event.character || game.online.remoteCharacter || "gojo";
+      if (game.domain > 0 && game.domainOwnerSlot === game.online.slot && !game.clash) {
+        game.domainClashPending = true;
+        beginClash("DOMAIN COLLISION", true);
+        return;
+      }
       if (game.online.localDomainWindow > 0) {
         game.domainClashPending = true;
         beginClash("DOMAIN COLLISION", true);
