@@ -1167,6 +1167,18 @@ kbd {
   background: repeating-conic-gradient(from 0deg, transparent 0 6deg, #5aeaff12 7deg 8deg);
   animation: spin 7s linear infinite;
 }
+.clash-panel.domain-clash {
+  background: linear-gradient(90deg, transparent 0 var(--clash-split, 50%), transparent var(--clash-split, 50%) 100%);
+}
+.clash-panel.domain-clash::before {
+  opacity: .28;
+  background: linear-gradient(90deg, #61eaff18 0 var(--clash-split, 50%), #ff315818 var(--clash-split, 50%) 100%);
+}
+.clash-panel.domain-clash { justify-content: flex-start; padding-top: 24px; }
+.clash-panel.domain-clash p { margin: 0; color: #fff; text-shadow: 2px 2px #17051d; }
+.clash-panel.domain-clash h2 { margin-top: 8px; font-size: 34px; text-shadow: 5px 5px #3c239a; }
+.clash-panel.domain-clash .clash-meter { position: absolute; bottom: 84px; }
+.clash-panel.domain-clash .clash-keys { position: absolute; bottom: 30px; margin: 0; }
 @keyframes spin { to { transform: rotate(360deg) scale(1.2); } }
 .clash-panel p { z-index: 1; color: var(--cyan); letter-spacing: 6px; font-size: 11px; }
 .clash-panel h2 { z-index: 1; margin: 4px; font: 75px "Press Start 2P"; transform: skew(-8deg); text-shadow: 8px 8px #3c239a; }
@@ -1182,7 +1194,7 @@ kbd {
 .clash-meter i, .clash-meter em { position: absolute; top: 0; bottom: 0; width: 50%; transition: width .08s; }
 .clash-meter i { left: 0; background: linear-gradient(90deg, #207cff, #7feaff); }
 .clash-meter em { right: 0; background: linear-gradient(90deg, #ff6086, #bd1749); }
-.clash-meter b { position: absolute; z-index: 2; top: -8px; bottom: -8px; left: 50%; width: 4px; background: white; }
+.clash-meter b { position: absolute; z-index: 2; top: -8px; bottom: -8px; left: var(--clash-split, 50%); width: 4px; background: white; transition: left .08s; box-shadow: 0 0 18px white; }
 .clash-keys { z-index: 1; display: flex; gap: 20px; align-items: center; margin-top: 22px; color: #afbdd8; font-size: 11px; letter-spacing: 3px; }
 .clash-keys kbd { padding: 12px; font-size: 16px; animation: keyPulse .35s alternate infinite; }
 @keyframes keyPulse { to { color: #07101a; background: var(--cyan); box-shadow: 0 0 20px var(--cyan); } }
