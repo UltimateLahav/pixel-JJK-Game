@@ -66,7 +66,7 @@ function normalizeInput(raw = {}) {
     specialRelease,
     fuga: Boolean(raw.fuga),
     domain: Boolean(raw.domain),
-    awaken: Boolean(raw.awaken),
+    awaken: false,
     clash: clamp(Math.round(Number(raw.clash) || 0), -1, 1),
   };
 }
@@ -471,10 +471,6 @@ class AuthoritativeMatch {
           else if (input.fuga) this.startFuga(player);
           else if (input.special) this.startSpecial(player, input.special);
           else if (input.domain) this.startDomain(player, opponent);
-          else if (input.awaken && player.energy >= 40) {
-            player.energy -= 40;
-            player.awakeningTicks = 720;
-          }
         }
       } else {
         player.vx = 0;
