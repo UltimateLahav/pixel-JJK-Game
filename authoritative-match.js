@@ -350,6 +350,15 @@ class AuthoritativeMatch {
       player.damage += damage;
       this.events.push({ kind: "domainSlash", slot: opponent.slot, sourceSlot: player.slot, damage, tick: this.tick });
     }
+    if (input.domain && !player.attack && !this.clash) this.startDomain(player, opponent);
+    if (this.clash?.type === "domain") {
+      player.blocking = false;
+      player.charging = false;
+      player.attack = null;
+      player.vx = 0;
+      player.vy = 0;
+      return;
+    }
     if (player.pendingFollowup && this.tick >= player.pendingFollowup.tick) {
       const target = this.players[player.pendingFollowup.target];
       if (target && target.health > 0) {
@@ -866,7 +875,8 @@ class AuthoritativeMatch {
       player.sukunaDomainUses++;
       this.updateWorldSlashUnlock(player);
     }
-    const otherRecent = opponent.domainTicks > 0 || opponent.domainStartupTicks > 0;
+    const counterDomain = opponent.domainTicks > 0;
+    const otherRecent = counterDomain || opponent.domainStartupTicks > 0;
     player.domainTicks = 0;
     player.pendingDomainTicks = player.character === "gojo" ? 720 : player.character === "sukuna" ? 900 : 3600;
     player.domainStartupTicks = DOMAIN_STARTUP_TICKS;
@@ -881,7 +891,7 @@ class AuthoritativeMatch {
       durationTicks: player.pendingDomainTicks, startupTicks: player.domainStartupTicks, tick: this.tick,
     });
     if (otherRecent && !this.clash) {
-      this.clash = { type: "domain", ticks: 240, power: 50, last: { 1: 0, 2: 0 } };
+      this.clash = { type: "domain", ticks: 240, power: 50, last: { 1: 0, 2: 0 }, counterDomain };
     }
   }
 
@@ -1144,6 +1154,9 @@ class AuthoritativeMatch {
         winner.jackpotTicks = 2280;
         winner.energy = 100;
         winner.domainTicks = 0;
+      } else {
+        winner.domainTicks = winner.character === "gojo" ? 720 : winner.character === "sukuna" ? 900 : 3600;
+        winner.domainElapsedTicks = 0;
       }
       loser.domainTicks = 0;
       winner.domainStartupTicks = 0;
