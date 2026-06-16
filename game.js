@@ -486,6 +486,7 @@
   }
 
   function renderCharacterSelection() {
+    ensureCharacterRoster();
     const profile = characters[selectedCharacter];
     $$(".character-card").forEach((card) => card.classList.toggle("active", card.dataset.character === selectedCharacter));
     ui.selectCharacterName.textContent = profile.name;
@@ -496,7 +497,40 @@
       .join("");
   }
 
+  function bindCharacterCard(card) {
+    if (!card || card.dataset.bound === "true") return;
+    card.dataset.bound = "true";
+    card.addEventListener("click", () => {
+      if (selectionLocked) return;
+      selectedCharacter = card.dataset.character;
+      renderCharacterSelection();
+      if (onlineSelection) {
+        window.dispatchEvent(new CustomEvent("voidlimit:characterPreview", { detail: { character: selectedCharacter } }));
+      }
+    });
+  }
+
+  function ensureCharacterRoster() {
+    const roster = document.querySelector(".character-roster");
+    if (!roster || document.querySelector('.character-card[data-character="higuruma"]')) {
+      $$(".character-card").forEach(bindCharacterCard);
+      return;
+    }
+    if (typeof roster.insertAdjacentHTML !== "function") return;
+    roster.insertAdjacentHTML("beforeend", `
+        <button class="character-card" data-character="higuruma">
+          <div class="pixel-portrait higuruma-pixel">
+            <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
+          </div>
+          <span>DEADLY LAWYER</span>
+          <strong>HIROMI HIGURUMA</strong>
+          <small>TACTICAL / GAVEL</small>
+        </button>`);
+    $$(".character-card").forEach(bindCharacterCard);
+  }
+
   function openCharacterSelect(options = {}) {
+    ensureCharacterRoster();
     onlineSelection = Boolean(options.online);
     pendingOfflineSelection = !onlineSelection;
     selectionLocked = false;
@@ -5862,14 +5896,8 @@
 
   $$(".stage").forEach((button) => button.addEventListener("click", () => selectStage(button.dataset.stage)));
 
-  $$(".character-card").forEach((card) => card.addEventListener("click", () => {
-    if (selectionLocked) return;
-    selectedCharacter = card.dataset.character;
-    renderCharacterSelection();
-    if (onlineSelection) {
-      window.dispatchEvent(new CustomEvent("voidlimit:characterPreview", { detail: { character: selectedCharacter } }));
-    }
-  }));
+  ensureCharacterRoster();
+  $$(".character-card").forEach(bindCharacterCard);
   ui.confirmCharacter.addEventListener("click", confirmCharacterSelection);
   ui.characterBack.addEventListener("click", () => {
     if (onlineSelection) {
