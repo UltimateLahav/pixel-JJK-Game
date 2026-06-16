@@ -10,7 +10,7 @@ const DOMAIN_STARTUP_TICKS = 141;
 const EMPTY_INPUT = Object.freeze({
   move: 0, jump: false, dash: false, block: false, charge: false,
   light: false, heavy: false, special: "", specialHeld: "", specialRelease: "",
-  fuga: false, domain: false, awaken: false, clash: 0,
+  fuga: false, domain: false, awaken: false, clash: 0, trialChoice: -1,
 });
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -59,6 +59,57 @@ const CHARACTER = {
   },
 };
 
+const TRIAL_CRIMES = {
+  gojo: [
+    "Property destruction during sorcerer battles.",
+    "Endangering civilians by allowing dangerous fights to continue.",
+    "Ignoring jujutsu authority orders and acting outside the law.",
+  ],
+  sukuna: [
+    "Mass murder in Shibuya.",
+    "Possessing another person's body.",
+    "Killing and mutilating sorcerers and civilians.",
+  ],
+  hakari: [
+    "Running an illegal underground fight club.",
+    "Assaulting a jujutsu higher-up.",
+    "Illegal gambling and cursed energy betting.",
+  ],
+  higuruma: [
+    "Killing people after awakening as a sorcerer.",
+    "Abusing the courtroom system for personal judgment.",
+    "Joining the Culling Game and collecting points through violence.",
+  ],
+};
+
+const TRIAL_DIALOGUE = [
+  { id: "admit", text: "I admit it." },
+  { id: "selfDefense", text: "That was self-defense." },
+  { id: "noChoice", text: "I had no choice." },
+  { id: "noProof", text: "You have no proof." },
+  { id: "systemBlame", text: "The jujutsu world made me do it." },
+  { id: "protecting", text: "I was protecting someone." },
+  { id: "rejectCourt", text: "I do not recognize this court." },
+  { id: "necessary", text: "The damage was necessary." },
+  { id: "regret", text: "I regret what happened." },
+  { id: "silent", text: "I will say nothing." },
+];
+
+const TRIAL_ARGUMENTS = [
+  { id: "contradict", text: "Contradict the testimony." },
+  { id: "evidence", text: "Use Judgeman's evidence." },
+  { id: "motive", text: "Attack their motive." },
+  { id: "violence", text: "Expose their violence." },
+  { id: "falseDefense", text: "Argue self-defense is false." },
+  { id: "unnecessary", text: "Argue the damage was unnecessary." },
+  { id: "past", text: "Use their past actions against them." },
+  { id: "confiscation", text: "Push for Confiscation." },
+  { id: "deathPenalty", text: "Push for Death Penalty." },
+  { id: "mercy", text: "Show mercy and ask for a lighter verdict." },
+];
+
+const isSevereTrialCrime = (crime = "") => /murder|mass murder|possess|killing|mutilating|civilians/i.test(crime);
+
 function normalizeInput(raw = {}) {
   const special = ["red", "blue", "purple"].includes(raw.special) ? raw.special : "";
   const specialHeld = raw.specialHeld === "red" ? "red" : "";
@@ -78,6 +129,7 @@ function normalizeInput(raw = {}) {
     domain: Boolean(raw.domain),
     awaken: false,
     clash: clamp(Math.round(Number(raw.clash) || 0), -1, 1),
+    trialChoice: clamp(Math.round(Number(raw.trialChoice ?? -1)), -1, 2),
   };
 }
 
@@ -88,6 +140,7 @@ function heldInput(input) {
     block: input.block,
     charge: input.charge,
     specialHeld: input.specialHeld,
+    trialChoice: -1,
   };
 }
 
@@ -139,6 +192,9 @@ function makePlayer(meta, settings) {
     chargedReleaseTicks: -1,
     dismantleVolley: null,
     moveConfiscationTicks: 0,
+    executionSwordTicks: 0,
+    executionSwordUsed: false,
+    executionRecoveryTicks: 0,
     fugaTicks: 0,
     fugaFired: false,
     hakariRollInputs: [],
@@ -167,6 +223,7 @@ class AuthoritativeMatch {
     this.history = new Map();
     this.events = [];
     this.clash = null;
+    this.trial = null;
     this.result = null;
     this.onSnapshot = onSnapshot;
     this.onResult = onResult;
@@ -218,6 +275,7 @@ class AuthoritativeMatch {
       players: clone(this.players),
       projectiles: clone(this.projectiles),
       clash: clone(this.clash),
+      trial: clone(this.trial),
       result: clone(this.result),
       lastInputs: clone(this.lastInputs),
       events: clone(this.events),
@@ -232,6 +290,7 @@ class AuthoritativeMatch {
     this.players = clone(saved.players);
     this.projectiles = clone(saved.projectiles);
     this.clash = clone(saved.clash);
+    this.trial = clone(saved.trial);
     this.result = clone(saved.result);
     this.lastInputs = clone(saved.lastInputs);
     this.events = clone(saved.events || []);
@@ -252,6 +311,14 @@ class AuthoritativeMatch {
     this.saveHistory();
     const input1 = this.inputFor(1);
     const input2 = this.inputFor(2);
+    if (this.trial) {
+      this.updateTrial(input1, input2);
+      if (!this.domainClockPaused()) this.roundTicks++;
+      this.tick++;
+      this.checkResult();
+      if (!resimulating && this.tick % SNAPSHOT_INTERVAL === 0) this.emitSnapshot(false);
+      return;
+    }
     if (this.clash) {
       this.updateClash(input1, input2);
       if (!this.domainClockPaused()) this.roundTicks++;
@@ -279,7 +346,7 @@ class AuthoritativeMatch {
   }
 
   domainClockPaused() {
-    return Object.values(this.players).some((player) => player.domainTicks > 0 || player.domainStartupTicks > 0);
+    return Boolean(this.trial) || Object.values(this.players).some((player) => player.domainTicks > 0 || player.domainStartupTicks > 0);
   }
 
   updatePlayer(player, opponent, input) {
@@ -293,7 +360,18 @@ class AuthoritativeMatch {
     player.invuln = Math.max(0, player.invuln - 1);
     player.awakeningTicks = Math.max(0, player.awakeningTicks - 1);
     player.jackpotTicks = Math.max(0, player.jackpotTicks - 1);
+    const hadConfiscation = player.moveConfiscationTicks > 0;
     player.moveConfiscationTicks = Math.max(0, player.moveConfiscationTicks - 1);
+    const hadExecutionSword = player.executionSwordTicks > 0;
+    player.executionSwordTicks = Math.max(0, player.executionSwordTicks - 1);
+    player.executionRecoveryTicks = Math.max(0, player.executionRecoveryTicks - 1);
+    if (hadExecutionSword && player.executionSwordTicks <= 0) {
+      player.executionSwordUsed = false;
+      this.events.push({ kind: "executionSwordEnd", slot: player.slot, tick: this.tick });
+    }
+    if (hadConfiscation && player.moveConfiscationTicks <= 0) {
+      this.events.push({ kind: "trialConfiscationEnd", slot: player.slot, tick: this.tick });
+    }
     if (player.fugaTicks > 0) {
       player.fugaTicks--;
       player.invuln = Math.max(player.invuln, 2);
@@ -330,6 +408,11 @@ class AuthoritativeMatch {
     const domainWasActive = player.domainTicks > 0;
     if (player.domainStartupTicks > 0) {
       player.domainStartupTicks--;
+      if (player.domainStartupTicks === 0 && player.character === "higuruma" && player.pendingDomainTicks < 0) {
+        player.pendingDomainTicks = 0;
+        this.beginTrial(player, opponent);
+        return;
+      }
       if (player.domainStartupTicks === 0 && player.pendingDomainTicks > 0) {
         player.domainTicks = player.pendingDomainTicks;
         player.pendingDomainTicks = 0;
@@ -398,13 +481,23 @@ class AuthoritativeMatch {
       player.energy = Math.min(100, player.energy + .018);
     }
 
-    const domainOpening = player.domainStartupTicks > 0 || opponent.domainStartupTicks > 0;
+    const opponentTrialStartup = opponent.character === "higuruma" && opponent.domainStartupTicks > 0 && opponent.pendingDomainTicks < 0;
+    const playerTrialStartup = player.character === "higuruma" && player.domainStartupTicks > 0 && player.pendingDomainTicks < 0;
+    const domainOpening = (player.domainStartupTicks > 0 && !playerTrialStartup) || (opponent.domainStartupTicks > 0 && !opponentTrialStartup);
     if (domainOpening) {
       player.blocking = false;
       player.charging = false;
       player.attack = null;
       player.vx = 0;
       player.vy = 0;
+      return;
+    }
+    if (playerTrialStartup) {
+      player.blocking = false;
+      player.charging = false;
+      player.vx = 0;
+      player.vy = 0;
+      player.attack = null;
       return;
     }
 
@@ -433,7 +526,12 @@ class AuthoritativeMatch {
       return;
     }
 
-    if (player.stun > 0) {
+    if (player.executionRecoveryTicks > 0) {
+      player.blocking = false;
+      player.charging = false;
+      player.attack = null;
+      player.vx = 0;
+    } else if (player.stun > 0) {
       player.blocking = false;
       player.charging = false;
     } else if (player.dashTicks > 0 && !player.attack) {
@@ -487,7 +585,14 @@ class AuthoritativeMatch {
       }
     }
 
-    if (player.attack && this.tick >= player.attack.endTick) player.attack = null;
+    if (player.attack && this.tick >= player.attack.endTick) {
+      if (player.attack.kind === "executionSword" && !player.attack.hit) {
+        player.executionSwordTicks = 0;
+        player.executionRecoveryTicks = Math.max(player.executionRecoveryTicks, 90);
+        this.events.push({ kind: "executionSwordMiss", slot: player.slot, tick: this.tick });
+      }
+      player.attack = null;
+    }
     player.vy += 1800 / TICK_RATE;
     player.x = clamp(player.x + player.vx / TICK_RATE, 26, 1254);
     player.y += player.vy / TICK_RATE;
@@ -731,6 +836,9 @@ class AuthoritativeMatch {
   startSpecial(player, name) {
     if (player.moveConfiscationTicks > 0) return;
     let move = { ...CHARACTER[player.character].specials[name] };
+    if (player.character === "higuruma" && name === "purple" && player.executionSwordTicks > 0 && !player.executionSwordUsed) {
+      move = { cost: 0, cooldown: 90, kind: "executionSword", damage: 500 };
+    }
     if (player.character === "sukuna" && name === "purple" && !player.worldSlashUnlocked) return;
     if (player.character === "sukuna" && name === "purple" && player.worldSlashUses >= 2) return;
     if (player.character === "hakari" && player.jackpotTicks > 0 && name === "blue") {
@@ -761,6 +869,7 @@ class AuthoritativeMatch {
     if (player.character === "sukuna" && name === "red") player.dismantleUses++;
     if (player.character === "sukuna" && name === "blue") player.cleaveUses++;
     if (player.character === "sukuna" && name === "purple") player.worldSlashUses++;
+    if (player.character === "higuruma" && move.kind === "executionSword") player.executionSwordUsed = true;
     this.updateWorldSlashUnlock(player);
     this.events.push({
       kind: "specialCast", slot: player.slot, technique: move.kind,
@@ -819,18 +928,19 @@ class AuthoritativeMatch {
     }
     if (move.kind === "roughPunch" || move.kind === "cleave"
       || move.kind === "gamblersLuck" || move.kind === "feverBreaker"
-      || ["gavel", "gavelHookPull", "gavelThrow", "gavelAirSlam", "gavelSentence"].includes(move.kind)) {
+      || ["gavel", "gavelHookPull", "gavelThrow", "gavelAirSlam", "gavelSentence", "executionSword"].includes(move.kind)) {
       const gavelRanges = {
         gavel: 78,
         gavelHookPull: 225,
         gavelThrow: 112,
         gavelAirSlam: 82,
         gavelSentence: 156,
+        executionSword: 112,
       };
       player.attack = {
-        kind: move.kind, startTick: this.tick, activeTick: this.tick + 8,
-        endActiveTick: this.tick + (move.kind === "gamblersLuck" ? 22 : move.kind === "gavelSentence" ? 34 : 14),
-        endTick: this.tick + (move.kind === "gamblersLuck" ? 48 : move.kind === "feverBreaker" ? 38 : move.kind === "gavelSentence" ? 53 : 25),
+        kind: move.kind, startTick: this.tick, activeTick: this.tick + (move.kind === "executionSword" ? 14 : 8),
+        endActiveTick: this.tick + (move.kind === "executionSword" ? 22 : move.kind === "gamblersLuck" ? 22 : move.kind === "gavelSentence" ? 34 : 14),
+        endTick: this.tick + (move.kind === "executionSword" ? 47 : move.kind === "gamblersLuck" ? 48 : move.kind === "feverBreaker" ? 38 : move.kind === "gavelSentence" ? 53 : 25),
         damage: move.damage,
         range: gavelRanges[move.kind] || (move.kind === "gamblersLuck" ? 132 : enhancedCleave ? 148 : 105),
         strong: move.kind === "gavel" ? false : true, hit: false,
@@ -841,6 +951,8 @@ class AuthoritativeMatch {
           ? 285
           : move.kind === "feverBreaker"
             ? 220
+            : move.kind === "executionSword"
+              ? 220
             : 0;
       player.vx = player.facing * player.attack.moveSpeed;
       return;
@@ -909,17 +1021,245 @@ class AuthoritativeMatch {
     if (move.kind === "purple") player.unstablePurpleTicks = 0;
   }
 
+  pickTrialOptions(pool, player, salt) {
+    const used = new Set();
+    const result = [];
+    let step = 0;
+    while (result.length < 3 && result.length < pool.length) {
+      const index = this.deterministicRange(player, salt + step * 71, pool.length);
+      step++;
+      if (used.has(index)) continue;
+      used.add(index);
+      result.push(pool[index]);
+    }
+    return result;
+  }
+
+  calculateTrialScore(trial) {
+    const targetCharacter = trial.targetCharacter;
+    const crime = trial.crime;
+    const evidence = trial.evidence;
+    const dialogue = trial.dialogue || TRIAL_DIALOGUE.find((option) => option.id === "silent");
+    const argument = trial.argument || TRIAL_ARGUMENTS.find((option) => option.id === "evidence");
+    const severe = isSevereTrialCrime(crime);
+    const property = /property|damage|destruction|orders|gambling|fight club|higher-up|courtroom/i.test(crime);
+    let defense = 36;
+    let prosecutor = evidence;
+    let severity = severe ? 12 : 0;
+    const answer = dialogue.id;
+    const arg = argument.id;
+
+    if (answer === "admit") defense += severe ? -20 : 20;
+    if (answer === "selfDefense") defense += property ? 25 : -30;
+    if (answer === "noChoice") defense += /possess|survival|forced/i.test(crime) ? 20 : 5;
+    if (answer === "noProof") defense += evidence < 45 ? 20 : evidence > 60 ? -25 : -5;
+    if (answer === "systemBlame") defense += ["gojo", "hakari", "higuruma"].includes(targetCharacter) ? 20 : -15;
+    if (answer === "protecting") defense += ["gojo", "hakari"].includes(targetCharacter) ? 25 : targetCharacter === "sukuna" ? -25 : 5;
+    if (answer === "rejectCourt") {
+      defense += targetCharacter === "sukuna" ? 10 : -20;
+      if (targetCharacter !== "sukuna") severity += 10;
+    }
+    if (answer === "necessary") defense += property ? 18 : -20;
+    if (answer === "regret") {
+      defense += targetCharacter === "higuruma" ? 25 : ["gojo", "hakari"].includes(targetCharacter) ? 10 : -10;
+      severity -= targetCharacter === "sukuna" ? 0 : 10;
+    }
+    if (answer === "silent") {
+      defense += 4;
+      prosecutor -= 5;
+    }
+
+    if (arg === "evidence") prosecutor += 18;
+    if (arg === "contradict") prosecutor += ["noProof", "rejectCourt", "silent"].includes(answer) ? 22 : 10;
+    if (arg === "motive") prosecutor += ["systemBlame", "noChoice", "protecting"].includes(answer) ? 18 : 11;
+    if (arg === "violence") prosecutor += severe ? 24 : 12;
+    if (arg === "falseDefense") prosecutor += answer === "selfDefense" ? 26 : 8;
+    if (arg === "unnecessary") prosecutor += /property|damage|destruction/i.test(crime) || answer === "necessary" ? 24 : 8;
+    if (arg === "past") prosecutor += targetCharacter === "sukuna" ? 24 : 14;
+    if (arg === "confiscation") prosecutor += 12;
+    if (arg === "deathPenalty") {
+      prosecutor += severe ? 22 : 6;
+      severity += severe ? 12 : 0;
+    }
+    if (arg === "mercy") prosecutor -= 14;
+
+    if (targetCharacter === "sukuna") prosecutor += severe ? 12 : 6;
+    if (targetCharacter === "gojo" && /orders|property|civilians/i.test(crime)) prosecutor += 6;
+    if (targetCharacter === "hakari" && /gambling|fight club/i.test(crime)) prosecutor += 8;
+    if (targetCharacter === "higuruma" && /killing|judgment|Culling/i.test(crime)) prosecutor += 10;
+
+    const delta = Math.round(prosecutor + severity - defense);
+    let verdict = "MISTRIAL";
+    let punishment = "none";
+    if (defense - prosecutor >= 25) {
+      verdict = "NOT GUILTY";
+      punishment = "notGuilty";
+    } else if (Math.abs(delta) <= 7) {
+      verdict = "MISTRIAL";
+      punishment = "mistrial";
+    } else if (delta < 15) {
+      verdict = "GUILTY - FINE";
+      punishment = "fine";
+    } else if (delta >= (severe ? 30 : 40)) {
+      verdict = "GUILTY - DEATH PENALTY";
+      punishment = "deathPenalty";
+    } else {
+      verdict = "GUILTY - CONFISCATION";
+      punishment = "confiscation";
+    }
+    return { evidence, defense: Math.round(defense), prosecutor: Math.round(prosecutor), delta, severe, verdict, punishment };
+  }
+
+  beginTrial(player, opponent) {
+    const targetCharacter = TRIAL_CRIMES[opponent.character] ? opponent.character : "sukuna";
+    const crimes = TRIAL_CRIMES[targetCharacter];
+    const crime = crimes[this.deterministicRange(player, 503, crimes.length)];
+    const evidence = 30 + this.deterministicRange(player, isSevereTrialCrime(crime) ? 907 : 701, isSevereTrialCrime(crime) ? 57 : 51);
+    const options = this.pickTrialOptions(TRIAL_DIALOGUE, player, 1103);
+    this.trial = {
+      phase: "charge",
+      casterSlot: player.slot,
+      targetSlot: opponent.slot,
+      targetCharacter,
+      crime,
+      evidence,
+      options,
+      argumentOptions: [],
+      dialogue: null,
+      argument: null,
+      timer: 84,
+      maxTimer: 84,
+      verdict: "",
+      punishment: "none",
+    };
+    player.vx = 0;
+    player.vy = 0;
+    opponent.vx = 0;
+    opponent.vy = 0;
+    player.attack = null;
+    opponent.attack = null;
+    this.events.push({
+      kind: "trialCharge", casterSlot: player.slot, targetSlot: opponent.slot,
+      targetCharacter, crime, evidence, options, timerTicks: 480, tick: this.tick,
+    });
+  }
+
+  applyTrialPunishment(trial, score) {
+    const caster = this.players[trial.casterSlot];
+    const target = this.players[trial.targetSlot];
+    if (!caster || !target) return;
+    if (score.punishment === "confiscation") {
+      target.moveConfiscationTicks = Math.max(target.moveConfiscationTicks, 900);
+      target.attack = null;
+      target.charging = false;
+      target.chargedSpecialTicks = 0;
+      target.fugaTicks = 0;
+      target.jackpotTicks = 0;
+      this.events.push({ kind: "trialConfiscationStart", slot: target.slot, sourceSlot: caster.slot, durationTicks: 900, tick: this.tick });
+    } else if (score.punishment === "deathPenalty") {
+      caster.executionSwordTicks = 1080;
+      caster.executionSwordUsed = false;
+      caster.cooldowns.purple = 0;
+      this.events.push({ kind: "executionSwordStart", slot: caster.slot, targetSlot: target.slot, durationTicks: 1080, tick: this.tick });
+    } else if (score.punishment === "fine") {
+      target.energy = Math.max(0, target.energy - 25);
+      for (const key of Object.keys(target.cooldowns)) target.cooldowns[key] = Math.max(target.cooldowns[key], 120);
+    } else if (score.punishment === "mistrial") {
+      target.energy = Math.max(0, target.energy - 15);
+      caster.energy = Math.max(0, caster.energy - 15);
+      const direction = Math.sign(target.x - caster.x || 1);
+      target.vx = direction * 420;
+      caster.vx = -direction * 320;
+    } else if (score.punishment === "notGuilty") {
+      caster.energy = Math.max(0, caster.energy - 50);
+      caster.executionRecoveryTicks = Math.max(caster.executionRecoveryTicks, 240);
+    }
+  }
+
+  updateTrial(input1, input2) {
+    const trial = this.trial;
+    if (!trial) return;
+    const caster = this.players[trial.casterSlot];
+    const target = this.players[trial.targetSlot];
+    if (!caster || !target) {
+      this.trial = null;
+      return;
+    }
+    for (const player of [caster, target]) {
+      player.blocking = false;
+      player.charging = false;
+      player.attack = null;
+      player.vx = 0;
+      player.vy = 0;
+    }
+    trial.timer--;
+    if (trial.phase === "charge" && trial.timer <= 0) {
+      trial.phase = "testimony";
+      trial.timer = 480;
+      trial.maxTimer = 480;
+    }
+    if (trial.phase === "testimony") {
+      const input = trial.targetSlot === 1 ? input1 : input2;
+      let choice = Number(input.trialChoice ?? -1);
+      if (trial.timer <= 0) {
+        const silent = trial.options.findIndex((option) => option.id === "silent");
+        choice = silent >= 0 ? silent : 0;
+      }
+      if (choice >= 0 && choice < trial.options.length) {
+        trial.dialogue = trial.options[choice];
+        trial.argumentOptions = this.pickTrialOptions(TRIAL_ARGUMENTS, caster, 1307 + choice * 17);
+        trial.phase = "argument";
+        trial.timer = 480;
+        trial.maxTimer = 480;
+        this.events.push({
+          kind: "trialAccusedChoice", slot: target.slot, choiceIndex: choice,
+          choice: trial.dialogue, argumentOptions: trial.argumentOptions, timerTicks: 480, tick: this.tick,
+        });
+      }
+    } else if (trial.phase === "argument") {
+      const input = trial.casterSlot === 1 ? input1 : input2;
+      let choice = Number(input.trialChoice ?? -1);
+      if (trial.timer <= 0) {
+        const evidence = trial.argumentOptions.findIndex((option) => option.id === "evidence");
+        choice = evidence >= 0 ? evidence : 0;
+      }
+      if (choice >= 0 && choice < trial.argumentOptions.length) {
+        trial.argument = trial.argumentOptions[choice];
+        const score = this.calculateTrialScore(trial);
+        Object.assign(trial, score, { phase: "verdict", timer: 135, maxTimer: 135 });
+        this.applyTrialPunishment(trial, score);
+        this.events.push({
+          kind: "trialArgumentChoice", slot: caster.slot, choiceIndex: choice,
+          choice: trial.argument, tick: this.tick,
+        });
+        this.events.push({
+          kind: "trialVerdict", casterSlot: caster.slot, targetSlot: target.slot,
+          verdict: score.verdict, punishment: score.punishment,
+          evidence: score.evidence, defense: score.defense, prosecutor: score.prosecutor,
+          delta: score.delta, tick: this.tick,
+        });
+      }
+    } else if (trial.phase === "verdict" && trial.timer <= 0) {
+      trial.phase = "resume";
+      trial.timer = 48;
+      trial.maxTimer = 48;
+    } else if (trial.phase === "resume" && trial.timer <= 0) {
+      this.events.push({ kind: "trialPunishmentEnd", casterSlot: caster.slot, targetSlot: target.slot, punishment: trial.punishment, tick: this.tick });
+      this.trial = null;
+    }
+  }
+
   startDomain(player, opponent) {
     if (player.cooldowns.domain > 0 || player.moveConfiscationTicks > 0) return;
-    if (!["gojo", "sukuna", "hakari"].includes(player.character)) return;
-    if (player.character === "hakari" && player.energy < 100) return;
-    if (player.character === "hakari") player.energy = 0;
+    if (!["gojo", "sukuna", "hakari", "higuruma"].includes(player.character)) return;
+    if ((player.character === "hakari" || player.character === "higuruma") && player.energy < 100) return;
+    if (player.character === "hakari" || player.character === "higuruma") player.energy = 0;
     player.vx = 0;
     player.vy = 0;
     player.attack = null;
     player.blocking = false;
     player.charging = false;
-    player.cooldowns.domain = 1440;
+    player.cooldowns.domain = player.character === "higuruma" ? 1680 : 1440;
     player.domains++;
     if (player.character === "sukuna") {
       player.sukunaDomainUses++;
@@ -928,8 +1268,8 @@ class AuthoritativeMatch {
     const counterDomain = opponent.domainTicks > 0;
     const otherRecent = counterDomain || opponent.domainStartupTicks > 0;
     player.domainTicks = 0;
-    player.pendingDomainTicks = player.character === "gojo" ? 720 : player.character === "sukuna" ? 900 : 3600;
-    player.domainStartupTicks = DOMAIN_STARTUP_TICKS;
+    player.pendingDomainTicks = player.character === "higuruma" ? -1 : player.character === "gojo" ? 720 : player.character === "sukuna" ? 900 : 3600;
+    player.domainStartupTicks = player.character === "higuruma" ? 90 : DOMAIN_STARTUP_TICKS;
     player.domainElapsedTicks = 0;
     if (player.character === "hakari") {
       player.hakariRollInputs = [];
@@ -937,8 +1277,9 @@ class AuthoritativeMatch {
       player.hakariRollAttempts = 0;
     }
     this.events.push({
-      kind: "domainStart", slot: player.slot, character: player.character,
-      durationTicks: player.pendingDomainTicks, startupTicks: player.domainStartupTicks, tick: this.tick,
+      kind: player.character === "higuruma" ? "domainTrialStart" : "domainStart",
+      slot: player.slot, character: player.character,
+      durationTicks: Math.max(0, player.pendingDomainTicks), startupTicks: player.domainStartupTicks, tick: this.tick,
     });
     if (otherRecent && !this.clash) {
       this.clash = { type: "domain", ticks: 240, power: 50, last: { 1: 0, 2: 0 }, counterDomain };
@@ -1066,6 +1407,11 @@ class AuthoritativeMatch {
         defender.grounded = false;
         defender.stun = Math.max(defender.stun, 54);
         this.events.push({ kind: "gavelSentence", slot: defender.slot, sourceSlot: attacker.slot, tick: this.tick });
+      } else if (attack.kind === "executionSword") {
+        attacker.executionSwordTicks = 0;
+        attacker.executionSwordUsed = true;
+        defender.stun = Math.max(defender.stun, 60);
+        this.events.push({ kind: "executionSwordHit", slot: defender.slot, sourceSlot: attacker.slot, damage: attack.damage, tick: this.tick });
       }
     }
   }
@@ -1088,6 +1434,27 @@ class AuthoritativeMatch {
 
   applyDamage(attacker, defender, damage, strong, source) {
     if (defender.invuln > 0) return;
+    if (defender.character === "higuruma" && defender.domainStartupTicks > 0 && defender.pendingDomainTicks < 0) {
+      defender.domainStartupTicks = 0;
+      defender.pendingDomainTicks = 0;
+      defender.cooldowns.domain = Math.max(defender.cooldowns.domain, 420);
+      this.events.push({ kind: "domainTrialFailed", slot: defender.slot, source, tick: this.tick });
+    }
+    if (defender.attack?.kind === "executionSword" && this.tick < defender.attack.activeTick) {
+      defender.executionSwordTicks = 0;
+      defender.executionSwordUsed = true;
+      defender.executionRecoveryTicks = 90;
+      defender.attack = null;
+      this.events.push({ kind: "executionSwordMiss", slot: defender.slot, interrupted: true, tick: this.tick });
+    }
+    if (source === "executionSword" && defender.blocking) {
+      attacker.executionSwordTicks = 0;
+      attacker.executionSwordUsed = true;
+      attacker.executionRecoveryTicks = 90;
+      attacker.attack = null;
+      this.events.push({ kind: "executionSwordMiss", slot: attacker.slot, blocked: true, tick: this.tick });
+      return;
+    }
     if (defender.chargedSpecialTicks > 0) {
       if (defender.character === "gojo") defender.energy = Math.max(0, defender.energy - 30);
       if (defender.character === "sukuna") {
@@ -1230,6 +1597,10 @@ class AuthoritativeMatch {
         winner.jackpotTicks = 2280;
         winner.energy = 100;
         winner.domainTicks = 0;
+      } else if (domainClash && winner.character === "higuruma") {
+        winner.domainTicks = 0;
+        winner.domainElapsedTicks = 0;
+        this.beginTrial(winner, loser);
       } else if (domainClash) {
         winner.domainTicks = winner.character === "gojo" ? 720 : winner.character === "sukuna" ? 900 : 3600;
         winner.domainElapsedTicks = 0;
@@ -1303,6 +1674,9 @@ class AuthoritativeMatch {
       chargedSpecialTicks: player.chargedSpecialTicks,
       chargedReleaseTicks: player.chargedReleaseTicks,
       moveConfiscationTicks: player.moveConfiscationTicks,
+      executionSwordTicks: player.executionSwordTicks,
+      executionSwordUsed: player.executionSwordUsed,
+      executionRecoveryTicks: player.executionRecoveryTicks,
       fugaTicks: player.fugaTicks,
       hakariRollInputs: player.hakariRollInputs,
       hakariLastRarity: player.hakariLastRarity,
@@ -1317,6 +1691,7 @@ class AuthoritativeMatch {
       players: { 1: serializePlayer(this.players[1]), 2: serializePlayer(this.players[2]) },
       projectiles: this.projectiles.map((projectile) => ({ ...projectile })),
       clash: this.clash ? { ...this.clash } : null,
+      trial: this.trial ? { ...this.trial } : null,
       events: consumeEvents ? this.events.splice(0) : clone(this.events),
       result: this.result,
     };
