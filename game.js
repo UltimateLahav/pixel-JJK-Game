@@ -76,6 +76,7 @@
   const H = canvas.height;
   const GROUND = 596;
   const GRAVITY = 2150;
+  const MAX_PARTICLES = 220;
   const keys = new Set();
   const pressed = new Set();
   const bg = new Image();
@@ -812,7 +813,11 @@
   }
 
   function spawnParticles(x, y, color, count = 12, speed = 280, size = 5, life = .45) {
-    for (let i = 0; i < count; i++) {
+    const available = Math.max(0, MAX_PARTICLES - game.particles.length);
+    if (available <= 0) return;
+    const pressureScale = game.particles.length > MAX_PARTICLES * .72 ? .45 : 1;
+    const amount = Math.min(available, Math.max(1, Math.ceil(count * pressureScale)));
+    for (let i = 0; i < amount; i++) {
       const a = rnd(0, Math.PI * 2);
       const s = rnd(speed * .25, speed);
       game.particles.push({
@@ -835,9 +840,9 @@
     game.flash = Math.max(game.flash, .28);
     game.shake = Math.max(game.shake, 28);
     game.cameraTarget = Math.max(game.cameraTarget, 1.28);
-    spawnParticles(explosionX, explosionY, "#08020f", 60, 760, 15, 1.2);
-    spawnParticles(explosionX, explosionY, "#a15cff", 90, 860, 13, 1.25);
-    spawnParticles(explosionX, explosionY, "#ff704a", 34, 620, 8, .85);
+    spawnParticles(explosionX, explosionY, "#08020f", 24, 680, 12, 1);
+    spawnParticles(explosionX, explosionY, "#a15cff", 36, 760, 10, 1.05);
+    spawnParticles(explosionX, explosionY, "#ff704a", 12, 520, 7, .72);
     announce("PURPLE COLLAPSE");
     tone(35, 1.1, "sawtooth", .48, 240);
     noise(.8, .38);
@@ -1738,9 +1743,9 @@
     game.cameraFocusY = y;
     game.glitch = .18;
     announce("UNSTABLE HOLLOW PURPLE");
-    spawnParticles(x, y, "#814dff", 45, 390, 9, 1);
-    spawnParticles(x, y, "#ff315d", 18, 320, 6, .7);
-    spawnParticles(x, y, "#438cff", 18, 320, 6, .7);
+    spawnParticles(x, y, "#814dff", 22, 340, 7, .82);
+    spawnParticles(x, y, "#ff315d", 8, 280, 5, .58);
+    spawnParticles(x, y, "#438cff", 8, 280, 5, .58);
     tone(48, 1.2, "sawtooth", .28, 105);
     noise(.18, .16);
     sendOnline("event", {
@@ -1802,7 +1807,7 @@
       },
     });
     spawnShockwave(purple.x, purple.y, "#e9d6ff");
-    spawnParticles(purple.x, purple.y, "#b06cff", 60, 690, 11, 1.1);
+    spawnParticles(purple.x, purple.y, "#b06cff", 28, 610, 9, .9);
     damageProps(p, { strong: true, damage: 100, range: 900, y: -180, h: 240 });
     game.props.forEach((prop) => { prop.hp = 0; });
     tone(42, 1.2, "sawtooth", .46, 330);
@@ -3103,7 +3108,7 @@
       if (o.life <= 0 || o.x < -300 || o.x > W + 300) {
         if (["red", "purple", "dismantle", "worldSlash", "fuga"].includes(o.type)) {
           const color = o.type === "purple" ? "#8c5fff" : o.type === "fuga" ? "#ff7a25" : "#ff3d62";
-          spawnParticles(o.x, o.y, color, o.type === "purple" || o.type === "worldSlash" ? 34 : 20, 450, 8, .75);
+          spawnParticles(o.x, o.y, color, o.type === "purple" ? 12 : o.type === "worldSlash" ? 18 : 14, 380, 7, .55);
         }
         game.projectiles.splice(i, 1);
       }
@@ -3164,7 +3169,7 @@
     if (purple.pulse <= 0) {
       purple.pulse = .08;
       const color = chance(.5) ? "#ff2858" : "#4f8dff";
-      spawnParticles(purple.x + rnd(-32, 32), purple.y + rnd(-32, 32), color, 2, 180, 5, .38);
+      spawnParticles(purple.x + rnd(-32, 32), purple.y + rnd(-32, 32), color, 1, 150, 4, .3);
     }
     if (purple.lightning <= 0) {
       purple.lightning = .13;
@@ -3285,6 +3290,9 @@
       }
       p.vx *= Math.pow(.03, dt);
       if (p.life <= 0) game.particles.splice(i, 1);
+    }
+    if (game.particles.length > MAX_PARTICLES) {
+      game.particles.splice(0, game.particles.length - MAX_PARTICLES);
     }
     for (let i = game.afterimages.length - 1; i >= 0; i--) {
       game.afterimages[i].life -= dt;
@@ -4485,9 +4493,9 @@
         ctx.fillStyle = "#f5eaff";
         ctx.fillRect(55, -14, 90, 28);
         ctx.fillStyle = "#a35cff";
-        for (let i = 0; i < 14; i++) pixelRect(rnd(-145, 125), rnd(-57, 57), rnd(5, 18), rnd(3, 8), "#b370ff");
+        for (let i = 0; i < 6; i++) pixelRect(rnd(-145, 125), rnd(-57, 57), rnd(4, 12), rnd(2, 6), "#b370ff");
         ctx.fillStyle = "#110218";
-        for (let i = 0; i < 7; i++) pixelRect(rnd(-120, 110), rnd(-50, 50), rnd(8, 24), rnd(2, 6), "#110218");
+        for (let i = 0; i < 3; i++) pixelRect(rnd(-120, 110), rnd(-50, 50), rnd(6, 16), rnd(2, 5), "#110218");
       } else if (o.type === "dismantle" || o.type === "worldSlash") {
         ctx.rotate(Math.atan2(o.vy, o.vx));
         const length = o.type === "worldSlash" ? 270 : 112;
@@ -5761,7 +5769,7 @@
       }
       game.shake = 6;
       game.glitch = .18;
-      spawnParticles(event.x, event.y, "#814dff", 45, 390, 9, 1);
+      spawnParticles(event.x, event.y, "#814dff", 18, 320, 7, .75);
       announce("UNSTABLE HOLLOW PURPLE");
     } else if (event.kind === "purpleCollapse") {
       showPurpleCollapse(event.x, event.y);
