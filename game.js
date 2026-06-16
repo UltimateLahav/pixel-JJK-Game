@@ -226,6 +226,21 @@
       costs: { blue: 20, red: 16, purple: 14, domain: 100 },
       cooldowns: { blue: 5.5, red: 3.8, purple: 4.2, domain: 25 },
     },
+    higuruma: {
+      id: "higuruma",
+      name: "HIROMI HIGURUMA",
+      title: "DEADLY LAWYER",
+      difficulty: "MEDIUM/HARD",
+      description: "A calm lawyer sorcerer who fights with a cursed gavel that changes shape, letting him hit from different ranges and punish enemies with smart timing.",
+      abilities: [
+        ["E", "SHAPESHIFTING GAVEL"],
+        ["R", "GAVEL HOOK"],
+        ["Q", "GIANT GAVEL SENTENCE"],
+      ],
+      labels: { red: "GAVEL", blue: "HOOK", purple: "SENTENCE" },
+      costs: { red: 18, blue: 22, purple: 55 },
+      cooldowns: { red: 4.5, blue: 6, purple: 12 },
+    },
   };
 
   const enemyTypes = [
@@ -304,6 +319,18 @@
     { ...hakariGroundChain[3], name: "Dash-Through Punch", duration: .22, damage: 9.5, range: 92, kbX: 65 },
     { ...hakariGroundChain[4], name: "Jackpot Uppercut", duration: .32, damage: 16, kbX: 110, kbY: 720, reaction: "launcher", launcher: true, jumpCancel: true },
   ];
+  const higurumaGroundChain = [
+    { name: "Opening Statement", duration: .21, start: .045, end: .105, cancel: .12, range: 50, h: 42, y: -70, damage: 4.6, kbX: 62, reaction: "body", color: "#f3df9f" },
+    { name: "Gavel Jab", duration: .24, start: .055, end: .13, cancel: .145, range: 61, h: 46, y: -66, damage: 5.6, kbX: 78, reaction: "body", color: "#c9933e", gavel: true, dashCancel: true },
+    { name: "Cross Examination", duration: .28, start: .07, end: .16, cancel: .18, range: 73, h: 51, y: -76, damage: 6.8, kbX: 96, reaction: "head", color: "#d8aa48", gavel: true, dashCancel: true, flashEligible: true },
+    { name: "Gavel Uppercut", duration: .32, start: .085, end: .19, cancel: .215, range: 68, h: 62, y: -82, damage: 7.8, kbX: 92, kbY: 260, reaction: "launcher", color: "#f1c96a", gavel: true },
+    { name: "Verdict Slam", duration: .48, start: .16, end: .3, cancel: .32, range: 86, h: 78, y: -68, damage: 13.5, kbX: 405, kbY: 110, reaction: "body", color: "#f2cf74", strong: true, flashEligible: true, finisher: true, gavel: true },
+  ];
+  const higurumaAirChain = [
+    { name: "Aerial Brief", duration: .24, start: .05, end: .13, cancel: .145, range: 55, h: 46, y: -70, damage: 5.4, kbX: 70, kbY: 42, reaction: "air", color: "#f3df9f" },
+    { name: "Hooking Argument", duration: .29, start: .07, end: .17, cancel: .19, range: 68, h: 54, y: -72, damage: 7, kbX: 95, kbY: 72, reaction: "air", color: "#d8aa48", gavel: true },
+    { name: "Adjourned Drop", duration: .43, start: .13, end: .27, cancel: .29, range: 72, h: 70, y: -50, damage: 11.8, kbX: 90, kbY: -620, reaction: "slam", color: "#f2cf74", downslam: true, strong: true, finisher: true, gavel: true },
+  ];
 
   function characterProfile(entity = game.player) {
     return characters[entity?.character || selectedCharacter] || characters.gojo;
@@ -312,6 +339,7 @@
   function characterChains(entity = game.player) {
     if (entity?.character === "sukuna") return { ground: sukunaGroundChain, air: sukunaAirChain };
     if (entity?.character === "hakari") return { ground: entity.jackpot > 0 ? hakariJackpotGroundChain : hakariGroundChain, air: hakariAirChain };
+    if (entity?.character === "higuruma") return { ground: higurumaGroundChain, air: higurumaAirChain };
     return { ground: groundChain, air: airChain };
   }
 
@@ -521,6 +549,7 @@
     if (localCharacter === "gojo" && remoteCharacter === "sukuna") return "GOJO: LET'S SETTLE WHO STANDS AT THE TOP.";
     if (localCharacter === "hakari" && remoteCharacter === "gojo") return "HAKARI: LET'S SEE IF THE STRONGEST CAN BEAT LUCK.";
     if (localCharacter === "hakari" && remoteCharacter === "sukuna") return "HAKARI: EVEN A KING CAN LOSE A BAD BET.";
+    if (localCharacter === "higuruma") return "HIGURUMA: I WILL END THIS WITH PROCEDURE.";
     if (localCharacter === "sukuna") return "SUKUNA: YOU NEVER STOOD A CHANCE.";
     if (localCharacter === "hakari") return "HAKARI: FEELING LUCKY?";
     return "GOJO: THIS SHOULD BE INTERESTING.";
@@ -636,7 +665,8 @@
     ui.hud.classList.remove("hidden");
     announce(selectedMode === "training" ? "TRAINING START"
       : selectedCharacter === "sukuna" ? "THE KING ENTERS"
-        : selectedCharacter === "hakari" ? "FEVER START" : "CURTAIN OPEN");
+        : selectedCharacter === "hakari" ? "FEVER START"
+          : selectedCharacter === "higuruma" ? "COURT IS IN SESSION" : "CURTAIN OPEN");
     updateHud();
     tone(110, .35, "sawtooth", .25, 330);
   }
@@ -797,7 +827,11 @@
       startM1(aerial);
       return;
     } else {
-      const attack = p.character === "hakari"
+      const attack = p.character === "higuruma"
+        ? aerial
+          ? { name: "Falling Gavel", duration: .48, start: .15, end: .31, range: 76, h: 72, y: -52, damage: 16, kbX: 165, kbY: -520, color: "#f2cf74", strong: true, gavel: true }
+          : { name: "Objection Strike", duration: .46, start: .16, end: .3, range: 86, h: 66, y: -74, damage: 16, kbX: 320, kbY: 230, color: "#d8aa48", strong: true, gavel: true }
+        : p.character === "hakari"
         ? aerial
           ? { name: "Fever Dropkick", duration: .45, start: .14, end: .28, range: 74, h: 68, y: -50, damage: 15.5, kbX: 180, kbY: -480, color: "#54f082", strong: true, rough: true }
           : { name: "Roughhouse Haymaker", duration: .44, start: .16, end: .29, range: 80, h: 64, y: -72, damage: 16, kbX: 330, kbY: 260, color: "#54f082", strong: true, rough: true }
@@ -835,13 +869,17 @@
       p.nextM1Fast = false;
     }
     if (!aerial && step === 4 && directionForward) {
-      attack = p.character === "hakari"
+      attack = p.character === "higuruma"
+        ? { ...attack, name: "Brief Launcher", range: 76, damage: 13.2, kbX: 72, kbY: 650, reaction: "launcher", launcher: true, jumpCancel: true, grab: true, color: "#f2cf74" }
+        : p.character === "hakari"
         ? { ...attack, name: "Fever Headbutt", range: 70, damage: 13, kbX: 75, kbY: 660, reaction: "launcher", launcher: true, jumpCancel: true, grab: true }
         : p.character === "sukuna"
         ? { ...attack, name: "Savage Ascent", range: 68, damage: 12, kbX: 70, kbY: 680, reaction: "launcher", launcher: true, jumpCancel: true, grab: true }
         : { ...attack, name: "Rising Limit", kbX: 95, kbY: 610, reaction: "launcher", launcher: true, jumpCancel: true };
     } else if (!aerial && step === 4 && directionDown) {
-      attack = p.character === "hakari"
+      attack = p.character === "higuruma"
+        ? { ...attack, name: "Judgment Floor Slam", y: -53, h: 70, damage: 14.2, kbX: 38, kbY: -650, reaction: "slam", downslam: true, groundFollow: true, bounce: true, color: "#f2cf74" }
+        : p.character === "hakari"
         ? { ...attack, name: "Lucky Floor Slam", y: -53, h: 67, damage: 14, kbX: 38, kbY: -610, reaction: "slam", downslam: true, groundFollow: true, bounce: true }
         : p.character === "sukuna"
         ? { ...attack, name: "Shrine Breaker", y: -54, h: 66, damage: 14, kbX: 45, kbY: -820, reaction: "slam", downslam: true, groundFollow: true }
@@ -856,9 +894,9 @@
       chain: true,
       chainStep: step,
       aerial,
-      specialCancel: true,
+      specialCancel: p.character === "higuruma" ? (!aerial && (step === 2 || step === 3)) : true,
       hitConfirmed: false,
-      color: p.character === "hakari" ? "#55f087" : p.character === "sukuna" ? (attack.slash ? "#ff244f" : "#ff7892") : attack.flashEligible ? "#9cefff" : "#78eaff",
+      color: p.character === "higuruma" ? (attack.color || "#d8aa48") : p.character === "hakari" ? "#55f087" : p.character === "sukuna" ? (attack.slash ? "#ff244f" : "#ff7892") : attack.flashEligible ? "#9cefff" : "#78eaff",
     };
     if (!aerial) {
       p.vx = 0;
@@ -969,15 +1007,21 @@
 
   function beginChargedTechnique(name) {
     const p = game.player;
-    if (!p || p.techniqueCharge || p.stun > 0 || p.attack || p.charging || p.moveConfiscation > 0) return false;
-    if (name !== "red" || !["gojo", "sukuna"].includes(p.character) || p.cooldowns.red > 0) return false;
-    const cost = p.character === "sukuna" ? 16 : 26;
+    if (!p || p.techniqueCharge || p.stun > 0 || p.charging || p.moveConfiscation > 0) return false;
+    if (name !== "red" || !["gojo", "sukuna", "higuruma"].includes(p.character) || p.cooldowns.red > 0) return false;
+    const canSpecialCancel = p.attack?.hitConfirmed && p.attack.specialCancel && p.attack.elapsed >= p.attack.start;
+    if (p.attack && !canSpecialCancel) return false;
+    const cost = characterProfile(p).costs.red;
     if (p.energy < cost) return false;
+    if (canSpecialCancel) {
+      p.attack = null;
+      game.score += 150;
+    }
     p.techniqueCharge = { name, elapsed: 0, releaseDelay: -1, auto: false };
     p.vx = 0;
-    p.state = p.character === "sukuna" ? "dismantleCharge" : "redCharge";
+    p.state = p.character === "sukuna" ? "dismantleCharge" : p.character === "higuruma" ? "gavelCharge" : "redCharge";
     p.blocking = false;
-    announce(p.character === "sukuna" ? "DISMANTLE CHARGE" : "REVERSAL: RED CHARGE");
+    announce(p.character === "sukuna" ? "DISMANTLE CHARGE" : p.character === "higuruma" ? "GAVEL CHARGE" : "REVERSAL: RED CHARGE");
     return true;
   }
 
@@ -986,6 +1030,10 @@
     if (!p?.techniqueCharge || p.techniqueCharge.releaseDelay >= 0) return;
     if (p.techniqueCharge.elapsed <= .3) {
       fireQuickTechnique();
+      return;
+    }
+    if (p.character === "higuruma") {
+      fireChargedTechnique();
       return;
     }
     p.techniqueCharge.releaseDelay = .5;
@@ -997,7 +1045,8 @@
     if (interrupted) {
       if (p.character === "gojo") p.energy = Math.max(0, p.energy - 30);
       if (p.character === "sukuna") p.cooldowns.red = Math.max(p.cooldowns.red, characters.sukuna.cooldowns.red * .5);
-      announce(p.character === "gojo" ? "RED CHARGE BROKEN -30 CE" : "DISMANTLE INTERRUPTED");
+      if (p.character === "higuruma") p.cooldowns.red = Math.max(p.cooldowns.red, characters.higuruma.cooldowns.red * .5);
+      announce(p.character === "gojo" ? "RED CHARGE BROKEN -30 CE" : p.character === "higuruma" ? "GAVEL CHARGE BROKEN" : "DISMANTLE INTERRUPTED");
     }
     p.techniqueCharge = null;
   }
@@ -1065,12 +1114,47 @@
     if (volley.remaining <= 0) p.dismantleVolley = null;
   }
 
+  function startHigurumaGavelAttack(charged = false) {
+    const p = game.player;
+    if (!p) return;
+    p.attack = charged
+      ? {
+        name: "Giant Gavel Swing", elapsed: 0, duration: .62, start: .18, end: .4,
+        active: false, hit: new Set(), type: "gavel", specialCancel: false,
+        range: 132, h: 82, y: -74, damage: 28, kbX: 390, kbY: 180,
+        reaction: "body", color: "#f2cf74", strong: true, gavel: true, crack: true,
+      }
+      : {
+        name: "Shapeshifting Gavel", elapsed: 0, duration: .42, start: .1, end: .24,
+        active: false, hit: new Set(), type: "gavel", specialCancel: true,
+        range: 76, h: 58, y: -70, damage: 15, kbX: 250, kbY: 100,
+        reaction: "body", color: "#d8aa48", strong: false, gavel: true,
+      };
+    p.vx = 0;
+    p.dashTime = 0;
+    p.state = charged ? "giantGavel" : "gavel";
+    if (charged) {
+      spawnShockwave(p.x + p.facing * 86, GROUND - 4, "#f2cf74");
+      spawnParticles(p.x + p.facing * 86, GROUND - 7, "#c9933e", 26, 320, 8, .7);
+      game.shake = Math.max(game.shake, 8);
+    }
+  }
+
   function fireQuickTechnique() {
     const p = game.player;
     const e = game.enemy;
     if (!p?.techniqueCharge) return;
     p.techniqueCharge = null;
     p.vx = 0;
+    if (p.character === "higuruma") {
+      p.energy -= characters.higuruma.costs.red;
+      p.cooldowns.red = characters.higuruma.cooldowns.red;
+      startHigurumaGavelAttack(false);
+      announce("SHAPESHIFTING GAVEL");
+      spawnParticles(p.x + p.facing * 42, p.y - 66, "#f2cf74", 14, 230, 6, .45);
+      tone(280, .13, "square", .2, 90);
+      return;
+    }
     if (p.character === "gojo") {
       p.energy -= 26;
       p.cooldowns.red = characters.gojo.cooldowns.red;
@@ -1109,6 +1193,14 @@
     const ratio = clamp(charge.elapsed / 5, 0, 1);
     p.techniqueCharge = null;
     p.vx = 0;
+    if (p.character === "higuruma") {
+      p.energy -= characters.higuruma.costs.red;
+      p.cooldowns.red = characters.higuruma.cooldowns.red;
+      startHigurumaGavelAttack(true);
+      announce("GIANT GAVEL");
+      tone(175, .22, "square", .24, 160);
+      return;
+    }
     if (p.character === "gojo") {
       p.energy -= 26;
       p.cooldowns.red = characters.gojo.cooldowns.red;
@@ -1187,6 +1279,7 @@
     const domainResponse = game.online.active && name === "domain" && game.online.remoteDomainWindow > 0;
     if (!p || p.stun > 0 || p.charging || p.techniqueCharge || p.chargeRecovery > 0 || p.moveConfiscation > 0
       || (game.cinematic > 0 && !domainResponse) || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (!(name in profile.costs)) return;
     if (p.character === "gojo" && name === "purple") {
       if (!game.unstablePurple || game.unstablePurple.state !== "unstable") return;
       stabilizeHollowPurple();
@@ -1225,6 +1318,8 @@
       useHakariTechnique(name);
     } else if (p.character === "sukuna") {
       useSukunaTechnique(name);
+    } else if (p.character === "higuruma") {
+      useHigurumaTechnique(name);
     } else if (name === "blue") {
       if (!p.grounded && p.jumps === 0) {
         p.attack = {
@@ -1294,6 +1389,66 @@
       }, 285);
     } else if (name === "domain") {
       activateDomain();
+    }
+  }
+
+  function useHigurumaTechnique(name) {
+    const p = game.player;
+    const e = game.enemy;
+    if (name === "red") {
+      startHigurumaGavelAttack(false);
+      announce("SHAPESHIFTING GAVEL");
+      tone(280, .13, "square", .2, 90);
+    } else if (name === "blue") {
+      const distance = Math.abs(e.x - p.x);
+      if (!p.grounded) {
+        p.attack = {
+          name: "Downward Gavel Hook", elapsed: 0, duration: .58, start: .14, end: .36,
+          active: false, hit: new Set(), type: "gavelHook", specialCancel: false,
+          range: 78, h: 86, y: -40, damage: 18, kbX: 80, kbY: -680,
+          reaction: "slam", color: "#f2cf74", strong: true, gavel: true, downslam: true, bounce: true,
+        };
+        p.vy = Math.max(p.vy, 620);
+        p.state = "hookSlam";
+        announce("DOWNWARD HOOK");
+      } else if (distance <= 108) {
+        p.attack = {
+          name: "Gavel Hook Throw", elapsed: 0, duration: .54, start: .12, end: .32,
+          active: false, hit: new Set(), type: "gavelHook", specialCancel: false,
+          range: 112, h: 72, y: -74, damage: 16, kbX: 220, kbY: 160,
+          reaction: "body", color: "#d8aa48", strong: true, gavel: true, throwBehind: true,
+        };
+        p.state = "hookThrow";
+        announce("GAVEL HOOK THROW");
+      } else {
+        p.attack = {
+          name: "Gavel Hook Pull", elapsed: 0, duration: .48, start: .11, end: .3,
+          active: false, hit: new Set(), type: "gavelHook", specialCancel: true,
+          range: 225, h: 58, y: -72, damage: 10, kbX: 210, kbY: 60,
+          reaction: "body", color: "#c9933e", strong: false, gavel: true, pull: true,
+        };
+        p.state = "hook";
+        announce("GAVEL HOOK");
+      }
+      p.vx = 0;
+      p.dashTime = 0;
+      tone(330, .16, "square", .22, -90);
+    } else if (name === "purple") {
+      p.attack = {
+        name: "Giant Gavel Sentence", elapsed: 0, duration: .88, start: .34, end: .56,
+        active: false, hit: new Set(), type: "sentence", specialCancel: false,
+        range: 156, h: 108, y: -78, damage: 45, kbX: 360, kbY: -820,
+        reaction: "slam", color: "#f2cf74", strong: true, gavel: true, downslam: true,
+        crumple: true, glass: true,
+      };
+      p.vx = 0;
+      p.dashTime = 0;
+      p.state = "sentence";
+      game.cinematic = .22;
+      game.cameraTarget = 1.16;
+      game.shake = Math.max(game.shake, 10);
+      announce("GIANT GAVEL SENTENCE");
+      tone(110, .35, "square", .28, 210);
     }
   }
 
@@ -1992,7 +2147,26 @@
       defender.vy = attack.downslam || attack.reaction === "slam" ? Math.abs(attack.kbY) : -Math.abs(attack.kbY);
       defender.grounded = false;
     }
+    if (attack.pull) {
+      defender.x = lerp(defender.x, attacker.x + attacker.facing * 64, .65);
+      defender.vx = -attacker.facing * 420;
+      defender.stun = Math.max(defender.stun, .55);
+    }
+    if (attack.throwBehind) {
+      defender.x = clamp(attacker.x - attacker.facing * 72, 26, W - 26);
+      defender.vx = -attacker.facing * 520;
+      defender.vy = -120;
+      defender.grounded = false;
+      defender.stun = Math.max(defender.stun, .68);
+    }
+    if (attack.crumple && defender.grounded) {
+      defender.stun = Math.max(defender.stun, .9);
+      defender.vx *= .35;
+    }
     defender.stun = armored ? .08 : clamp(.12 + damage * .012, .16, .62);
+    if (attack.pull) defender.stun = Math.max(defender.stun, .55);
+    if (attack.throwBehind) defender.stun = Math.max(defender.stun, .68);
+    if (attack.crumple && defender.grounded) defender.stun = Math.max(defender.stun, .9);
     defender.flash = .12;
     if (!armored) defender.attack = null;
     defender.reaction = attack.reaction || (!defender.grounded ? "air" : attack.strong ? "body" : "stumble");
@@ -2038,6 +2212,26 @@
           game.shake = Math.max(game.shake, attack.strong ? 13 : 7);
         }
       }
+      if (p.character === "higuruma" || attack.gavel) {
+        spawnParticles(defender.x, defender.y - defender.h * .58, "#f2cf74", attack.strong ? 22 : 11, 330, 7, .5);
+        spawnParticles(defender.x + rnd(-14, 14), defender.y - defender.h * .55, "#fff7dc", attack.strong ? 12 : 6, 210, 5, .42);
+        if (attack.glass) {
+          spawnShockwave(defender.x, defender.y - defender.h * .52, "#f2cf74");
+          game.realityCrack = Math.max(game.realityCrack, .2);
+          for (let i = 0; i < 12; i++) {
+            game.particles.push({
+              x: defender.x, y: defender.y - defender.h * .58,
+              vx: rnd(-430, 430), vy: rnd(-360, 160),
+              size: rnd(4, 10), color: i % 2 ? "#f2cf74" : "#fff7dc",
+              life: .55, maxLife: .55, gravity: 180, slash: true,
+            });
+          }
+        }
+        if (attack.crack) {
+          spawnShockwave(defender.x, GROUND - 2, "#f2cf74");
+          spawnParticles(defender.x, GROUND - 7, "#6c5130", 22, 300, 8, .65);
+        }
+      }
       p.regenBoost = Math.max(p.regenBoost, 2.2);
       game.score += Math.round(damage * 125 * Math.max(1, p.comboHits * .08));
       game.maxCombo = Math.max(game.maxCombo, p.comboHits);
@@ -2051,9 +2245,11 @@
       if (defender.adaptation) defender.adaptation[strategy] = (defender.adaptation[strategy] || 0) + 1;
       defender.lastPlayerStrategy = strategy;
       damageProps(attacker, attack);
-      if (attack.groundFollow || (attack.downslam && p.character === "sukuna")) {
-        spawnShockwave(defender.x, GROUND - 2, "#ff365e");
-        spawnParticles(defender.x, GROUND - 8, "#6d3540", 30, 390, 9, .8);
+      if (attack.groundFollow || (attack.downslam && (p.character === "sukuna" || p.character === "higuruma"))) {
+        const slamColor = p.character === "higuruma" ? "#f2cf74" : "#ff365e";
+        const dustColor = p.character === "higuruma" ? "#6c5130" : "#6d3540";
+        spawnShockwave(defender.x, GROUND - 2, slamColor);
+        spawnParticles(defender.x, GROUND - 8, dustColor, 30, 390, 9, .8);
         game.shake = 15;
         p.comboWindow = Math.max(p.comboWindow, .72);
       }
@@ -2207,13 +2403,14 @@
       p.techniqueCharge.elapsed = Math.min(5, p.techniqueCharge.elapsed + dt);
       p.vx = 0;
       p.blocking = false;
-      p.state = p.character === "sukuna" ? "dismantleCharge" : "redCharge";
+      p.state = p.character === "sukuna" ? "dismantleCharge" : p.character === "higuruma" ? "gavelCharge" : "redCharge";
       if (p.techniqueCharge.releaseDelay >= 0) {
         p.techniqueCharge.releaseDelay -= dt;
         if (p.techniqueCharge.releaseDelay <= 0) fireChargedTechnique();
       } else if (p.techniqueCharge.elapsed >= 5) {
         p.techniqueCharge.auto = true;
-        p.techniqueCharge.releaseDelay = .5;
+        if (p.character === "higuruma") fireChargedTechnique();
+        else p.techniqueCharge.releaseDelay = .5;
       }
     }
     updateDismantleVolley(dt);
@@ -2254,7 +2451,7 @@
       p.energy = Math.min(100, p.energy + dt * 24);
       if (p.chargePulse <= 0) {
         p.chargePulse = .06;
-        const chargeColor = p.character === "sukuna" ? "#ff3158" : p.character === "hakari" ? "#58ff8c" : "#65eaff";
+        const chargeColor = p.character === "sukuna" ? "#ff3158" : p.character === "hakari" ? "#58ff8c" : p.character === "higuruma" ? "#f2cf74" : "#65eaff";
         spawnParticles(p.x + rnd(-28, 28), p.y - rnd(20, 105), chargeColor, 2, 130, 5, .45);
       }
     }
@@ -2293,7 +2490,7 @@
       p.state = "dash";
     } else if (p.stun <= 0 && !p.attack && !p.charging && !p.techniqueCharge && p.chargeRecovery <= 0 && game.cinematic <= 0) {
       const move = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
-      const speed = (p.jackpot > 0 ? 402 : p.awakening > 0 ? (p.character === "sukuna" ? 385 : 360) : p.character === "sukuna" ? 312 : p.character === "hakari" ? 318 : 295) * (p.burnout > 0 ? .58 : 1);
+      const speed = (p.jackpot > 0 ? 402 : p.awakening > 0 ? (p.character === "sukuna" ? 385 : 360) : p.character === "sukuna" ? 312 : p.character === "hakari" ? 318 : p.character === "higuruma" ? 306 : 295) * (p.burnout > 0 ? .58 : 1);
       if (move) {
         const onlineDirectMovement = game.online.active && game.online.authoritative;
         const acceleration = p.grounded ? 22 : 7;
@@ -2303,7 +2500,7 @@
         if (p.grounded) p.state = "run";
         p.trailTimer -= dt;
         if (p.awakening > 0 && p.trailTimer <= 0) {
-          addAfterimage(p, p.character === "sukuna" ? "#ff3158" : p.character === "hakari" ? "#5cff91" : "#a7efff");
+          addAfterimage(p, p.character === "sukuna" ? "#ff3158" : p.character === "hakari" ? "#5cff91" : p.character === "higuruma" ? "#f2cf74" : "#a7efff");
           p.trailTimer = .09;
         }
       } else {
@@ -3287,16 +3484,16 @@
     ui.enemyLag.style.transform = `scaleX(${clamp(e.lagHealth / e.maxHealth, 0, 1)})`;
     ui.enemyEnergy.style.transform = `scaleX(${e.energy / 100})`;
     ui.playerName.textContent = `${profile.name}  ${Math.ceil(p.health)} HP`;
-    const playerPortrait = p.character === "sukuna" ? "sukuna-portrait" : p.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
-    const playerMark = p.character === "sukuna" ? "SK" : p.character === "hakari" ? "HK" : "VI";
+    const playerPortrait = p.character === "sukuna" ? "sukuna-portrait" : p.character === "hakari" ? "hakari-portrait" : p.character === "higuruma" ? "higuruma-portrait" : "gojo-portrait";
+    const playerMark = p.character === "sukuna" ? "SK" : p.character === "hakari" ? "HK" : p.character === "higuruma" ? "HG" : "VI";
     ui.playerPortrait.className = `portrait ${playerPortrait}`;
     ui.playerPortrait.querySelector("span").textContent = playerMark;
     ui.enemyName.textContent = `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
     ui.enemyState.textContent = game.online.active
       ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}${e.burned ? " / BURNED" : ""}`
       : e.type.rank;
-    const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : "gojo-portrait";
-    const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : "VI";
+    const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : e.character === "higuruma" ? "higuruma-portrait" : "gojo-portrait";
+    const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : e.character === "higuruma" ? "HG" : "VI";
     ui.enemyPortrait.className = `portrait ${game.online.active ? enemyPortrait : "curse-portrait"}`;
     ui.enemyPortrait.querySelector("span").textContent = game.online.active ? enemyMark : "CR";
     const normalPlayerState = game.online.active
@@ -3308,7 +3505,7 @@
     ui.playerState.textContent = p.charging
       ? `CHARGING CE ${p.energy.toFixed(0)}%`
       : p.techniqueCharge
-        ? `${p.character === "sukuna" ? "DISMANTLE" : "RED"} CHARGE ${p.techniqueCharge.elapsed.toFixed(1)}/5.0s`
+        ? `${p.character === "sukuna" ? "DISMANTLE" : p.character === "higuruma" ? "GAVEL" : "RED"} CHARGE ${p.techniqueCharge.elapsed.toFixed(1)}/5.0s`
       : p.moveConfiscation > 0
           ? `TECHNIQUES CONFISCATED ${p.moveConfiscation.toFixed(1)}s`
         : game.domain > 0 && game.domainOwnerSlot === (game.online.active ? game.online.slot : 1)
@@ -3342,8 +3539,12 @@
     ui.combatPrompt.classList.toggle("visible", !!prompt);
     ui.combatPrompt.classList.toggle("black-flash", blackFlashPrompt);
 
+    document.querySelectorAll("[data-ability]").forEach((el) => {
+      el.classList.toggle("hidden", !(el.dataset.ability in profile.costs));
+    });
     for (const [name] of Object.entries(profile.costs)) {
       const el = document.querySelector(`[data-ability="${name}"]`);
+      if (!el) continue;
       const tuning = abilityTuning(p, name);
       const cost = tuning.cost;
       const cd = p.cooldowns[name];
@@ -3952,9 +4153,131 @@
     if (entity.flash > 0 && !tint) drawHakari(entity, clamp(entity.flash / .12, 0, 1), "#ffffff");
   }
 
+  function drawHiguruma(entity, alpha = 1, tint = null) {
+    const bob = entity.grounded && entity.state === "idle" ? Math.sin(performance.now() * .006) * 2 : 0;
+    const run = entity.state === "run" ? Math.sin(entity.stateTime * 22) : 0;
+    const attackT = entity.attack ? clamp(entity.attack.elapsed / entity.attack.duration, 0, 1) : 0;
+    const reach = entity.attack ? Math.sin(attackT * Math.PI) : 0;
+    const flow = clamp(entity.vx / 330, -1, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(Math.round(entity.x), Math.round(entity.y + bob));
+    ctx.scale(entity.facing, 1);
+
+    if ((entity.techniqueCharge || entity.attack?.gavel) && !tint) {
+      ctx.fillStyle = "#f2cf741c";
+      ctx.beginPath();
+      ctx.ellipse(0, -53, 44 + Math.sin(performance.now() * .01) * 5, 64, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff7dc";
+      for (let i = 0; i < 5; i++) pixelRect(rnd(-43, 43), rnd(-118, -26), rnd(4, 9), rnd(3, 8), i % 2 ? "#f2cf74" : "#fff7dc");
+    }
+
+    const burned = Boolean(entity.burned);
+    const inverted = entity.onlineVariant === "inverted";
+    const suit = tint || (burned ? (inverted ? "#c7c8ca" : "#111010") : inverted ? "#efe6d0" : "#15171e");
+    const suitShadow = tint || (burned ? (inverted ? "#8e8b87" : "#2a211c") : inverted ? "#6c5430" : "#282d38");
+    const shirt = tint || (burned ? (inverted ? "#4a4a4b" : "#d1cdc2") : inverted ? "#191b24" : "#efe9dd");
+    const tie = tint || (burned ? (inverted ? "#43607a" : "#44311a") : inverted ? "#37526b" : "#6b4a24");
+    const skin = tint || (burned ? (inverted ? "#9e9188" : "#6b4c3e") : inverted ? "#7fb6c9" : "#d0a18e");
+    const hair = tint || (burned ? (inverted ? "#e0ded8" : "#1b1716") : inverted ? "#d9d1bf" : "#17151a");
+    const hairShade = tint || (burned ? (inverted ? "#a7a199" : "#080707") : inverted ? "#a48d64" : "#312a28");
+    const gold = tint || (burned ? (inverted ? "#677694" : "#5b431f") : inverted ? "#3e5581" : "#d8aa48");
+    const paper = tint || (burned ? (inverted ? "#4c4a48" : "#c9c0a6") : inverted ? "#1f2633" : "#fff7dc");
+
+    let legA = run * 8;
+    let legB = -run * 8;
+    if (!entity.grounded) { legA = 7; legB = -8; }
+    if (entity.comboStep === 3 && entity.attack?.chain) legB = -24;
+    pixelRect(-17 + legA, -39, 13, 32, suit);
+    pixelRect(5 + legB, -39, 13, 32, suit);
+    pixelRect(-19 + legA, -9, 18, 9, tint || "#09090d");
+    pixelRect(2 + legB, -9, 20, 9, tint || "#09090d");
+    pixelRect(-24, -80, 48, 44, suit);
+    pixelRect(-18, -77, 36, 39, suitShadow);
+    pixelRect(-10, -78, 20, 38, shirt);
+    pixelRect(-4, -76, 8, 32, tie);
+    pixelRect(-25, -79, 8, 40, suit);
+    pixelRect(17, -79, 8, 40, suit);
+    pixelRect(-21, -45, 42, 8, tint || "#08090f");
+
+    let frontX = 15, frontY = -71, backX = -24, backY = -71;
+    if (entity.attack) {
+      frontX += reach * (entity.attack.type === "sentence" ? 32 : entity.attack.type === "gavelHook" ? 62 : entity.attack.gavel ? 52 : 40);
+      frontY += entity.attack.type === "sentence" ? -reach * 22 : entity.attack.type === "heavy" ? -reach * 18 : 0;
+      if (entity.attack.type === "gavelHook") backX += reach * 24;
+      if (entity.attack.type === "sentence") backY -= 14;
+    } else if (entity.blocking) {
+      frontX = 13; frontY = -86; backX = 3; backY = -76;
+    } else if (entity.state === "run") {
+      frontX -= run * 7;
+      backX += run * 7;
+    }
+    pixelRect(backX, backY, 12, 32, suit);
+    pixelRect(backX + 1, backY + 26, 10, 9, skin);
+    pixelRect(frontX, frontY, 12, 32, suit);
+    pixelRect(frontX + 1, frontY + 26, 10, 9, skin);
+
+    const gavelX = frontX + 8;
+    const gavelY = frontY + 25;
+    const giant = entity.attack?.type === "sentence" || (entity.attack?.type === "gavel" && entity.attack.strong);
+    const hook = entity.attack?.type === "gavelHook";
+    pixelRect(gavelX + 6, gavelY - 16, giant ? 44 : 24, giant ? 10 : 6, gold);
+    pixelRect(gavelX + 15, gavelY - 26, giant ? 24 : 13, giant ? 28 : 15, suitShadow);
+    if (hook) {
+      ctx.strokeStyle = gold;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(gavelX + 18, gavelY - 16);
+      ctx.lineTo(gavelX + 88 + reach * 54, gavelY - 28);
+      ctx.lineTo(gavelX + 101 + reach * 54, gavelY - 12);
+      ctx.stroke();
+    }
+    if (entity.attack?.glass && !tint) {
+      ctx.strokeStyle = "#fff7dc";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.moveTo(42 + reach * 50, -90 + i * 12);
+        ctx.lineTo(82 + reach * 70, -105 + i * 18);
+        ctx.stroke();
+      }
+    }
+
+    pixelRect(-16, -106, 32, 31, skin);
+    pixelRect(-18 - flow * 2, -108, 7, 16, hairShade);
+    pixelRect(-17 - flow * 2, -113, 9, 20, hair);
+    pixelRect(-10 - flow * 3, -117, 11, 24, hair);
+    pixelRect(-1 - flow * 2, -119, 12, 26, hair);
+    pixelRect(8 - flow * 2, -115, 10, 21, hair);
+    pixelRect(14, -108, 6, 15, hairShade);
+    pixelRect(-12, -99, 10, 4, tint || "#2b2220");
+    pixelRect(4, -99, 10, 4, tint || "#2b2220");
+    pixelRect(-10, -94, 6, 3, tint || "#efe0cc");
+    pixelRect(6, -94, 6, 3, tint || "#efe0cc");
+    pixelRect(-7, -86, 16, 4, tint || "#694036");
+    pixelRect(-2, -79, 6, 3, tint || "#a87969");
+    if (burned && !tint) {
+      pixelRect(-13, -103, 6, 10, inverted ? "#43526a" : "#070606");
+      pixelRect(7, -72, 8, 13, inverted ? "#5b6f91" : "#35271a");
+      pixelRect(-22, -58, 6, 14, inverted ? "#91a3d4" : "#d09d40");
+    }
+    if (entity.attack?.gavel && !tint) {
+      ctx.strokeStyle = gold;
+      ctx.lineWidth = entity.attack.strong ? 7 : 4;
+      ctx.beginPath();
+      ctx.moveTo(24, -78);
+      ctx.lineTo(58 + reach * 58, -78 + rnd(-5, 5));
+      ctx.stroke();
+      for (let i = 0; i < 4; i++) pixelRect(33 + reach * rnd(16, 72), -88 + rnd(-20, 28), rnd(3, 8), rnd(3, 8), i % 2 ? paper : gold);
+    }
+    ctx.restore();
+    if (entity.flash > 0 && !tint) drawHiguruma(entity, clamp(entity.flash / .12, 0, 1), "#ffffff");
+  }
+
   function drawChargeAura(entity) {
     const t = performance.now() * .012;
-    const color = entity.character === "sukuna" ? "#ff3158" : entity.character === "hakari" ? "#58ff8c" : "#65eaff";
+    const color = entity.character === "sukuna" ? "#ff3158" : entity.character === "hakari" ? "#58ff8c" : entity.character === "higuruma" ? "#f2cf74" : "#65eaff";
     ctx.save();
     ctx.translate(Math.round(entity.x), Math.round(entity.y - 55));
     ctx.globalCompositeOperation = "lighter";
@@ -3979,8 +4302,9 @@
     if (elapsed <= 0) return;
     const ratio = elapsed / 5;
     const sukuna = entity.character === "sukuna";
-    const color = sukuna ? "#ff3158" : "#ff274f";
-    const core = sukuna ? "#fff0f2" : "#fff7f8";
+    const higuruma = entity.character === "higuruma";
+    const color = sukuna ? "#ff3158" : higuruma ? "#f2cf74" : "#ff274f";
+    const core = sukuna ? "#fff0f2" : higuruma ? "#fff7dc" : "#fff7f8";
     ctx.save();
     ctx.translate(Math.round(entity.x + entity.facing * 34), Math.round(entity.y - 72));
     ctx.globalCompositeOperation = "lighter";
@@ -4000,7 +4324,8 @@
   function drawFighter(entity, alpha = 1, tint = null) {
     if (entity?.charging && !tint) drawChargeAura(entity);
     if (entity?.techniqueCharge && !tint) drawTechniqueCharge(entity);
-    if (entity?.character === "hakari") drawHakari(entity, alpha, tint);
+    if (entity?.character === "higuruma") drawHiguruma(entity, alpha, tint);
+    else if (entity?.character === "hakari") drawHakari(entity, alpha, tint);
     else if (entity?.character === "sukuna") drawSukuna(entity, alpha, tint);
     else drawGojo(entity, alpha, tint);
   }
@@ -4788,7 +5113,7 @@
         light: edges.light,
         heavy: edges.heavy,
         special: edges.special,
-        specialHeld: ["gojo", "sukuna"].includes(game.player.character) && keys.has("e") ? "red" : "",
+        specialHeld: ["gojo", "sukuna", "higuruma"].includes(game.player.character) && keys.has("e") ? "red" : "",
         specialRelease: edges.specialRelease,
         fuga: edges.fuga,
         domain: edges.domain,
@@ -4825,6 +5150,12 @@
       door: "SHUTTER DOORS",
       gamblersLuck: "GAMBLER'S LUCK",
       feverBreaker: "FEVER BREAKER",
+      gavel: "SHAPESHIFTING GAVEL",
+      chargedGavel: "GIANT GAVEL",
+      gavelHookPull: "GAVEL HOOK",
+      gavelThrow: "GAVEL HOOK THROW",
+      gavelAirSlam: "DOWNWARD HOOK",
+      gavelSentence: "GIANT GAVEL SENTENCE",
       fuga: "FUGA",
     };
     const duration = Math.max(.1, (attack.endTick - attack.startTick) / 60);
@@ -4844,6 +5175,8 @@
       chainStep: attack.step || 0,
       hit: new Set(),
       strong: attack.kind !== "light" || attack.step === 4,
+      gavel: ["gavel", "chargedGavel", "gavelHookPull", "gavelThrow", "gavelAirSlam", "gavelSentence"].includes(attack.kind),
+      glass: attack.kind === "gavelSentence",
     };
   }
 
@@ -4919,6 +5252,12 @@
         announce("GAMBLER'S LUCK");
       } else if (remoteCast && event.technique === "feverBreaker") {
         announce("FEVER BREAKER");
+      } else if (remoteCast && event.technique === "gavel") {
+        announce("OPPONENT: SHAPESHIFTING GAVEL");
+      } else if (remoteCast && event.technique === "chargedGavel") {
+        announce("OPPONENT: GIANT GAVEL");
+      } else if (remoteCast && String(event.technique || "").startsWith("gavel")) {
+        announce(`OPPONENT: ${String(event.technique).replace(/([A-Z])/g, " $1").toUpperCase()}`);
       }
     } else if (event.kind === "hakariRollInput") {
       const rarity = String(event.rarity || "green").toUpperCase();
@@ -4963,6 +5302,13 @@
       const victim = event.slot === game.online.slot ? game.player : game.enemy;
       spawnParticles(victim.x, GROUND - 7, "#58ff8c", 30, 430, 9, .75);
       game.shake = 11;
+    } else if (["gavelHookPull", "gavelThrow", "gavelAirSlam", "gavelSentence"].includes(event.kind)) {
+      const victim = event.slot === game.online.slot ? game.player : game.enemy;
+      const groundImpact = event.kind === "gavelAirSlam" || event.kind === "gavelSentence";
+      spawnParticles(victim.x, victim.y - victim.h * .55, "#f2cf74", event.kind === "gavelSentence" ? 34 : 20, 430, 8, .7);
+      spawnParticles(victim.x, victim.y - victim.h * .55, "#fff7dc", 12, 260, 5, .45);
+      if (groundImpact) spawnShockwave(victim.x, GROUND - 4, "#f2cf74");
+      game.shake = Math.max(game.shake, event.kind === "gavelSentence" ? 17 : 10);
     } else if (event.kind === "jackpot") {
       announce(event.slot === game.online.slot ? "JACKPOT" : "OPPONENT HIT JACKPOT");
       if (game.hakariDomain && Array.isArray(event.slots)) game.hakariDomain.displaySlots = event.slots;
@@ -5187,6 +5533,8 @@
       chainStep: p.attack.chainStep,
       aerial: p.attack.aerial,
       slash: p.attack.slash,
+      gavel: p.attack.gavel,
+      glass: p.attack.glass,
     } : null;
     return {
       character: p.character,
@@ -5426,7 +5774,7 @@
     if (key === "e") {
       if (game.player?.character === "sukuna" && keys.has("r") && firstPress) {
         if (startFuga()) queueOnlineEdge("fuga");
-      } else if (["gojo", "sukuna"].includes(game.player?.character)) {
+      } else if (["gojo", "sukuna", "higuruma"].includes(game.player?.character)) {
         if (firstPress) beginChargedTechnique("red");
       } else {
         if (firstPress) queueOnlineEdge("special", "red");
@@ -5446,8 +5794,10 @@
       useAbility("purple");
     }
     if (key === "t") {
-      if (firstPress) queueOnlineEdge("domain");
-      useAbility("domain");
+      if ("domain" in characterProfile(game.player).costs) {
+        if (firstPress) queueOnlineEdge("domain");
+        useAbility("domain");
+      }
     }
     if (key === "s" && game.player) game.player.guardStart = performance.now();
   });
@@ -5455,7 +5805,7 @@
   window.addEventListener("keyup", (event) => {
     const key = event.key.toLowerCase();
     keys.delete(key);
-    if (key === "e" && ["gojo", "sukuna"].includes(game.player?.character)) {
+    if (key === "e" && ["gojo", "sukuna", "higuruma"].includes(game.player?.character)) {
       releaseChargedTechnique();
       queueOnlineEdge("specialRelease", "red");
     }
