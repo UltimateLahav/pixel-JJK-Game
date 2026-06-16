@@ -561,7 +561,7 @@ canvas {
 .character-roster {
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 11px;
   min-height: 0;
 }
@@ -596,6 +596,11 @@ canvas {
   border-color: #62f08f;
   box-shadow: 0 0 25px #48ff862b, inset 0 -4px #62f08f;
 }
+.character-card[data-character="higuruma"]:hover,
+.character-card[data-character="higuruma"].active {
+  border-color: #f2cf74;
+  box-shadow: 0 0 25px #f2cf7428, inset 0 -4px #f2cf74;
+}
 .character-card.locked::after {
   content: "LOCKED";
   position: absolute;
@@ -612,6 +617,7 @@ canvas {
 .character-card > span { z-index: 2; color: var(--cyan); font-size: 8px; letter-spacing: 2px; }
 .character-card[data-character="sukuna"] > span { color: #ff557c; }
 .character-card[data-character="hakari"] > span { color: #62f08f; }
+.character-card[data-character="higuruma"] > span { color: #f2cf74; }
 .character-card > strong { z-index: 2; margin-top: 4px; font-size: 16px; letter-spacing: 1px; }
 .character-card > small { z-index: 2; margin-top: 3px; color: #687996; font-size: 8px; letter-spacing: 1px; }
 .pixel-portrait {
@@ -691,6 +697,20 @@ canvas {
   background: #1b090c;
   box-shadow: 0 12px #57252a, -12px 20px #2ef06b, 12px 20px #2ef06b;
 }
+.higuruma-pixel .portrait-aura { background: radial-gradient(circle, #f2cf7450, transparent 66%); }
+.higuruma-pixel .portrait-body { background: #181b24; box-shadow: inset 10px 0 #303643, inset -7px 0 #6d4d27; }
+.higuruma-pixel .portrait-head { background: #d0a18e; box-shadow: -8px 6px #5a3a31; }
+.higuruma-pixel .portrait-hair {
+  top: 12%;
+  background: #17151a;
+  filter: drop-shadow(6px 6px #4d3b2b);
+  clip-path: polygon(0 88%, 9% 28%, 23% 48%, 37% 10%, 50% 45%, 67% 5%, 80% 49%, 99% 29%, 91% 100%);
+}
+.higuruma-pixel .portrait-face {
+  height: 4px;
+  background: #2b2220;
+  box-shadow: 0 11px #6b4036, -13px 19px #f2cf74, 12px 19px #fff7dc;
+}
 @keyframes portraitIdle { 50% { transform: translateY(4px); } }
 @keyframes portraitHair { 50% { transform: translate(-2px, -3px) skew(2deg); } }
 @keyframes portraitAura { 50% { transform: scale(1.08); opacity: .6; } }
@@ -735,6 +755,8 @@ canvas {
 .selection-player[data-character="sukuna"] > span { color: #ff557c; }
 .selection-player[data-character="hakari"] { background: linear-gradient(90deg, #153d25dd, #080e1cdb); }
 .selection-player[data-character="hakari"] > span { color: #62f08f; }
+.selection-player[data-character="higuruma"] { background: linear-gradient(90deg, #3d2e15dd, #080e1cdb); }
+.selection-player[data-character="higuruma"] > span { color: #f2cf74; }
 .select-actions {
   z-index: 1;
   grid-column: 1 / -1;
@@ -816,6 +838,9 @@ canvas {
 .intro-silhouette.hakari {
   filter: sepia(.6) saturate(3.2) hue-rotate(75deg) drop-shadow(0 0 26px #58ff8c99);
 }
+.intro-silhouette.higuruma {
+  filter: sepia(.8) saturate(1.9) hue-rotate(340deg) drop-shadow(0 0 24px #f2cf7488);
+}
 .intro-silhouette.inverted {
   filter: invert(1) hue-rotate(120deg) drop-shadow(0 0 24px #ff55ac88);
 }
@@ -894,6 +919,8 @@ canvas {
 .sukuna-portrait span { color: #ffe7e8; text-shadow: 3px 3px #a61539; }
 .hakari-portrait { border-color: #62f08f; background: linear-gradient(135deg, #234c32, #130c1e); }
 .hakari-portrait span { color: #e8ffec; text-shadow: 3px 3px #16773a; }
+.higuruma-portrait { border-color: #f2cf74; background: linear-gradient(135deg, #59421f, #11131c); }
+.higuruma-portrait span { color: #fff7dc; text-shadow: 3px 3px #8e6424; }
 .bars { flex: 1; min-width: 0; padding-top: 3px; }
 .name-row { display: flex; justify-content: space-between; align-items: end; height: 22px; }
 .name-row strong { font-size: 15px; letter-spacing: 1px; color: white; }
