@@ -147,6 +147,7 @@
     domainPrevious: 0,
     hakariDomain: null,
     trial: null,
+    trialHover: -1,
     jackpotFlash: 0,
     online: {
       active: false,
@@ -277,29 +278,29 @@
   };
 
   const trialDialoguePool = [
-    { id: "admit", text: "I admit it." },
-    { id: "selfDefense", text: "That was self-defense." },
-    { id: "noChoice", text: "I had no choice." },
-    { id: "noProof", text: "You have no proof." },
-    { id: "systemBlame", text: "The jujutsu world made me do it." },
-    { id: "protecting", text: "I was protecting someone." },
-    { id: "rejectCourt", text: "I do not recognize this court." },
-    { id: "necessary", text: "The damage was necessary." },
-    { id: "regret", text: "I regret what happened." },
-    { id: "silent", text: "I will say nothing." },
+    { id: "admit", text: "I admit it.", risk: "HONEST", icon: "paper", hint: "Strong for smaller charges. Bad if the crime is severe." },
+    { id: "selfDefense", text: "That was self-defense.", risk: "SAFE", icon: "shield", hint: "Good for battle claims. Bad for civilians or possession." },
+    { id: "noChoice", text: "I had no choice.", risk: "SAFE", icon: "paper", hint: "Useful when survival or force is believable." },
+    { id: "noProof", text: "You have no proof.", risk: "DENIAL", icon: "mask", hint: "Strong against weak evidence. Dangerous against strong evidence." },
+    { id: "systemBlame", text: "The jujutsu world made me do it.", risk: "RISKY", icon: "paper", hint: "Better for people hurt by jujutsu society." },
+    { id: "protecting", text: "I was protecting someone.", risk: "SAFE", icon: "shield", hint: "Good for heroic motives. Weak for cruel characters." },
+    { id: "rejectCourt", text: "I do not recognize this court.", risk: "AGGRESSIVE", icon: "warning", hint: "Disrespectful. Only intimidation can make it work." },
+    { id: "necessary", text: "The damage was necessary.", risk: "RISKY", icon: "warning", hint: "Good for battlefield damage. Bad for murder charges." },
+    { id: "regret", text: "I regret what happened.", risk: "HONEST", icon: "tear", hint: "Good for guilty characters. Bad for arrogant ones." },
+    { id: "silent", text: "I will say nothing.", risk: "SAFE", icon: "mask", hint: "Low risk, but it gives almost no defense." },
   ];
 
   const trialArgumentPool = [
-    { id: "contradict", text: "Contradict the testimony." },
-    { id: "evidence", text: "Use Judgeman's evidence." },
-    { id: "motive", text: "Attack their motive." },
-    { id: "violence", text: "Expose their violence." },
-    { id: "falseDefense", text: "Argue self-defense is false." },
-    { id: "unnecessary", text: "Argue the damage was unnecessary." },
-    { id: "past", text: "Use their past actions against them." },
-    { id: "confiscation", text: "Push for Confiscation." },
-    { id: "deathPenalty", text: "Push for Death Penalty." },
-    { id: "mercy", text: "Show mercy and ask for a lighter verdict." },
+    { id: "contradict", text: "Contradict the testimony.", risk: "SHARP", icon: "mask", hint: "Targets lies, denial, and silence." },
+    { id: "evidence", text: "Use Judgeman's evidence.", risk: "SAFE", icon: "paper", hint: "Best when evidence is strong." },
+    { id: "motive", text: "Attack their motive.", risk: "RISKY", icon: "warning", hint: "Targets selfish or weak excuses." },
+    { id: "violence", text: "Expose their violence.", risk: "AGGRESSIVE", icon: "warning", hint: "Stronger for severe violent crimes." },
+    { id: "falseDefense", text: "Argue self-defense is false.", risk: "SHARP", icon: "shield", hint: "Targets self-defense claims." },
+    { id: "unnecessary", text: "Argue the damage was unnecessary.", risk: "SHARP", icon: "paper", hint: "Targets damage and destruction charges." },
+    { id: "past", text: "Use their past actions against them.", risk: "RISKY", icon: "mask", hint: "Stronger against repeat violent offenders." },
+    { id: "confiscation", text: "Push for Confiscation.", risk: "SAFE", icon: "chain", hint: "Aims for a practical punishment." },
+    { id: "deathPenalty", text: "Push for Death Penalty.", risk: "AGGRESSIVE", icon: "sword", hint: "Only strong when the case is severe." },
+    { id: "mercy", text: "Show mercy and ask for a lighter verdict.", risk: "SAFE", icon: "tear", hint: "Lowers punishment, but can win narrow cases." },
   ];
 
   function trialTargetCharacter(entity) {
@@ -324,7 +325,44 @@
     return crimes[Math.floor(Math.random() * crimes.length)];
   }
 
-  function calculateTrialScore({ targetCharacter, crime, evidence, dialogue, argument }) {
+  function trialChargeLine(character, crime) {
+    if (/mass murder|murder|killing|mutilating/i.test(crime)) return "THE COURT PRESENTS A BLOOD-STAINED CHARGE.";
+    if (/property|damage|destruction/i.test(crime)) return "THE COURT PRESENTS THE DAMAGE REPORT.";
+    if (/gambling|fight club|betting/i.test(crime)) return "THE COURT PRESENTS ILLEGAL WAGERS.";
+    if (/possess/i.test(crime)) return "THE COURT PRESENTS A BODY WITHOUT CONSENT.";
+    if (character === "higuruma") return "THE COURT KNOWS ITS OWN REFLECTION.";
+    return "THE COURT PRESENTS THE CHARGE.";
+  }
+
+  function trialCharacterLine(character, phase) {
+    const lines = {
+      gojo: {
+        testimony: "You sure this court can hold me?",
+        verdict: "This got serious.",
+      },
+      sukuna: {
+        testimony: "Judge me? Know your place.",
+        verdict: "Try handing down that sentence.",
+      },
+      hakari: {
+        testimony: "Sounds like bad luck for me.",
+        verdict: "Guess the house is watching.",
+      },
+      higuruma: {
+        testimony: "I know exactly what this place means.",
+        verdict: "The law cuts both ways.",
+      },
+    };
+    return lines[character]?.[phase] || "The accused takes the stand.";
+  }
+
+  function trialVerdictLabel(verdict = "") {
+    if (verdict.includes("CONFISCATION")) return "GUILTY: CONFISCATION";
+    if (verdict.includes("DEATH")) return "GUILTY: DEATH PENALTY";
+    return verdict || "MISTRIAL";
+  }
+
+  function calculateTrialScore({ targetCharacter, crime, evidence, dialogue, argument, prosecutorBonus = 0, defenseBonus = 0 }) {
     const severe = isSevereTrialCrime(crime);
     const property = /property|damage|destruction|orders|gambling|fight club|higher-up|courtroom/i.test(crime);
     let defense = 36;
@@ -372,13 +410,21 @@
     if (targetCharacter === "hakari" && /gambling|fight club/i.test(crime)) prosecutor += 8;
     if (targetCharacter === "higuruma" && /killing|judgment|Culling/i.test(crime)) prosecutor += 10;
 
+    prosecutor += Number(prosecutorBonus || 0);
+    defense += Number(defenseBonus || 0);
     const delta = Math.round(prosecutor + severity - defense);
     let verdict = "MISTRIAL";
     let punishment = "none";
-    if (defense - prosecutor >= 25) verdict = "NOT GUILTY";
-    else if (Math.abs(delta) <= 7) verdict = "MISTRIAL";
-    else if (delta < 15) verdict = "GUILTY - FINE";
-    else if (delta >= (severe ? 30 : 40)) {
+    if (defense - prosecutor >= 25) {
+      verdict = "NOT GUILTY";
+      punishment = "notGuilty";
+    } else if (Math.abs(delta) <= 7) {
+      verdict = "MISTRIAL";
+      punishment = "mistrial";
+    } else if (delta < 15) {
+      verdict = "GUILTY - FINE";
+      punishment = "fine";
+    } else if (delta >= (severe ? 30 : 40)) {
       verdict = "GUILTY - DEATH PENALTY";
       punishment = "deathPenalty";
     } else {
@@ -1695,7 +1741,7 @@
   function startDeadlySentencing() {
     const p = game.player;
     if (!p || p.character !== "higuruma") return;
-    p.trialStartup = 1.5;
+    p.trialStartup = 2;
     p.trialStartupHealth = p.health;
     p.vx = 0;
     p.attack = null;
@@ -1706,8 +1752,8 @@
       target: "enemy",
       casterSlot: game.online.active ? game.online.slot : 1,
       targetSlot: game.online.active ? (game.online.slot === 1 ? 2 : 1) : 2,
-      timer: 1.5,
-      maxTimer: 1.5,
+      timer: 2,
+      maxTimer: 2,
       message: "DOMAIN EXPANSION: DEADLY SENTENCING",
       options: [],
       argumentOptions: [],
@@ -1716,8 +1762,8 @@
     };
     game.domainCharacter = "higuruma";
     game.domainOwnerSlot = game.online.active ? game.online.slot : 1;
-    game.domainIntro = 1.5;
-    game.cinematic = 1.5;
+    game.domainIntro = 2;
+    game.cinematic = 2;
     game.glitch = .7;
     game.windPaused = true;
     announce("DOMAIN EXPANSION: DEADLY SENTENCING");
@@ -1760,13 +1806,18 @@
       evidence,
       options,
       argumentOptions: [],
-      timer: 1.4,
-      maxTimer: 1.4,
-      message: "COURT IS NOW IN SESSION.",
+      timer: 3,
+      maxTimer: 3,
+      message: trialChargeLine(targetCharacter, crime),
+      line: trialChargeLine(targetCharacter, crime),
       chosenDialogue: null,
       chosenArgument: null,
       verdict: "",
       punishment: "none",
+      prosecutor: 0,
+      defense: 0,
+      prosecutorBonus: 0,
+      defenseBonus: 0,
     };
     clearTrialCombatMotion();
     game.domainIntro = 0;
@@ -1812,7 +1863,7 @@
     if (trial.phase === "testimony") {
       const option = trial.options[clamp(index, 0, 2)] || trial.options[0];
       trial.chosenDialogue = option;
-      trial.message = `ACCUSED: "${option.text}"`;
+      trial.message = `${trialCharacterLine(trial.targetCharacter, "testimony")} "${option.text}"`;
       trial.argumentOptions = randomTrialOptions(trialArgumentPool, 3);
       trial.phase = "argument";
       trial.timer = 8;
@@ -1836,17 +1887,47 @@
       argument,
     });
     Object.assign(trial, score, {
+      phase: "verdictClash",
+      timer: 3,
+      maxTimer: 3,
+      baseProsecutor: score.prosecutor,
+      baseDefense: score.defense,
+      prosecutorBonus: 0,
+      defenseBonus: 0,
+      message: "THE SCALE WILL DECIDE",
+    });
+    game.shake = 8;
+    announce("VERDICT CLASH");
+    tone(120, .18, "square", .18, 160);
+  }
+
+  function finalizeOfflineTrialVerdict() {
+    const trial = game.trial;
+    if (!trial) return;
+    const score = calculateTrialScore({
+      targetCharacter: trial.targetCharacter,
+      crime: trial.crime,
+      evidence: trial.evidence,
+      dialogue: trial.chosenDialogue || trialDialoguePool.find((option) => option.id === "silent"),
+      argument: trial.chosenArgument || trialArgumentPool.find((option) => option.id === "evidence"),
+      prosecutorBonus: trial.prosecutorBonus,
+      defenseBonus: trial.defenseBonus,
+    });
+    Object.assign(trial, score, {
       phase: "verdict",
-      timer: 2.25,
-      maxTimer: 2.25,
-      message: score.verdict,
+      timer: 2,
+      maxTimer: 2,
+      message: trialVerdictLabel(score.verdict),
+      verdict: score.verdict,
+      punishment: score.punishment,
     });
     applyTrialPunishment(score.punishment, trial.target === "player" ? game.player : game.enemy, trial.caster === "player" ? game.player : game.enemy);
-    game.shake = 18;
-    game.flash = .22;
-    announce(score.verdict);
-    tone(score.punishment === "deathPenalty" ? 70 : 120, .42, "square", .32, 260);
-    spawnParticles(W / 2, H / 2, "#f2cf74", 46, 520, 9, .95);
+    game.shake = 20;
+    game.flash = .28;
+    announce(trialVerdictLabel(score.verdict));
+    tone(score.punishment === "deathPenalty" ? 58 : 105, .48, "square", .34, 260);
+    noise(.22, .45);
+    spawnParticles(W / 2, H / 2, score.punishment === "deathPenalty" ? "#ffb23d" : "#f2cf74", 52, 560, 10, 1);
   }
 
   function applyTrialPunishment(punishment, target, caster) {
@@ -1890,13 +1971,23 @@
     game.trial.phase = "resume";
     game.trial.timer = .8;
     game.trial.maxTimer = .8;
-    game.trial.message = "FIGHT";
+    game.trial.message = "READY?";
     game.flash = .12;
   }
 
   function updateTrial(dt) {
     const trial = game.trial;
     if (!trial) return false;
+    if (game.player && game.enemy) {
+      const focus = trial.phase === "startup" || trial.phase === "argument"
+        ? game.player.x
+        : trial.phase === "testimony"
+          ? game.enemy.x
+          : W / 2;
+      game.cameraFocusX = lerp(game.cameraFocusX, focus, clamp(dt * 3.5, 0, 1));
+      game.cameraFocusY = lerp(game.cameraFocusY, trial.phase === "verdict" ? 175 : GROUND / 2 + 40, clamp(dt * 3.5, 0, 1));
+      game.cameraTarget = trial.phase === "startup" || trial.phase === "verdict" ? 1.25 : trial.phase === "argument" || trial.phase === "testimony" ? 1.14 : 1.04;
+    }
     if (trial.phase === "startup") {
       const p = game.player;
       if (!p || p.stun > 0 || p.health < p.trialStartupHealth - .1) {
@@ -1905,8 +1996,9 @@
       }
       trial.timer -= dt;
       p.trialStartup = Math.max(0, trial.timer);
-      if (trial.timer <= 0) beginOfflineTrial();
-      return false;
+      if (trial.timer <= 0 && (!game.online.active || !game.online.authoritative)) beginOfflineTrial();
+      clearTrialCombatMotion();
+      return true;
     }
     clearTrialCombatMotion();
     if (game.online.active && game.online.authoritative) {
@@ -1939,6 +2031,12 @@
     } else if (trial.phase === "argument" && trial.timer <= 0) {
       const evidenceIndex = Math.max(0, trial.argumentOptions.findIndex((option) => option.id === "evidence"));
       chooseTrialOption(evidenceIndex);
+    } else if (trial.phase === "verdictClash") {
+      if (keys.has("a")) trial.prosecutorBonus = Math.min(8, (trial.prosecutorBonus || 0) + dt * 3.2);
+      if (keys.has("d")) trial.defenseBonus = Math.min(8, (trial.defenseBonus || 0) + dt * 2.2);
+      if (trial.target !== "player") trial.defenseBonus = Math.min(8, (trial.defenseBonus || 0) + dt * 1.7);
+      if (Math.floor((trial.timer + dt) * 4) !== Math.floor(trial.timer * 4)) tone(58, .05, "sine", .12, 30);
+      if (trial.timer <= 0) finalizeOfflineTrialVerdict();
     } else if (trial.phase === "verdict" && trial.timer <= 0) {
       endTrialWithFightResume();
     } else if (trial.phase === "resume") {
@@ -4124,6 +4222,7 @@
         : cd > 0 ? `${cd.toFixed(1)}s` : "";
       el.classList.toggle("locked", p.energy < cost || cd > 0 || p.moveConfiscation > 0 || burntOutLock || !purpleReady
         || !worldSlashReady || !executionReady || (p.character === "sukuna" && name === "purple" && p.worldSlashUses >= 2));
+      el.classList.toggle("confiscated", p.moveConfiscation > 0);
       const hint = el.querySelector("b");
       if (hint && name === "purple") {
         hint.textContent = p.character === "sukuna" && !p.worldSlashUnlocked
@@ -4920,6 +5019,24 @@
     else if (entity?.character === "hakari") drawHakari(entity, alpha, tint);
     else if (entity?.character === "sukuna") drawSukuna(entity, alpha, tint);
     else drawGojo(entity, alpha, tint);
+    if (entity?.moveConfiscation > 0 && !tint) {
+      ctx.save();
+      ctx.globalAlpha = .72;
+      ctx.strokeStyle = "#f2cf74";
+      ctx.lineWidth = 4;
+      for (let i = 0; i < 3; i++) {
+        const y = entity.y - 84 + i * 24;
+        ctx.beginPath();
+        ctx.moveTo(entity.x - 42, y + Math.sin(performance.now() * .006 + i) * 5);
+        ctx.lineTo(entity.x + 42, y + Math.cos(performance.now() * .006 + i) * 5);
+        ctx.stroke();
+      }
+      ctx.font = '8px "Press Start 2P", monospace';
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff0a8";
+      ctx.fillText("CONFISCATED", entity.x, entity.y - 126);
+      ctx.restore();
+    }
   }
 
   function drawCurse(entity, alpha = 1, tint = null) {
@@ -5541,130 +5658,315 @@
     return lines;
   }
 
+  function drawTrialIcon(icon, x, y, color = "#f2cf74") {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 3;
+    if (icon === "shield") {
+      ctx.beginPath();
+      ctx.moveTo(0, -13); ctx.lineTo(13, -7); ctx.lineTo(8, 12); ctx.lineTo(0, 18); ctx.lineTo(-8, 12); ctx.lineTo(-13, -7); ctx.closePath();
+      ctx.stroke();
+    } else if (icon === "mask") {
+      ctx.strokeRect(-13, -10, 26, 20);
+      ctx.fillRect(-8, -3, 5, 4); ctx.fillRect(4, -3, 5, 4);
+      ctx.beginPath(); ctx.moveTo(-10, 11); ctx.lineTo(10, -10); ctx.stroke();
+    } else if (icon === "tear") {
+      ctx.fillStyle = "#75b8ff";
+      ctx.beginPath(); ctx.moveTo(0, -15); ctx.quadraticCurveTo(15, 5, 0, 17); ctx.quadraticCurveTo(-15, 5, 0, -15); ctx.fill();
+    } else if (icon === "warning") {
+      ctx.beginPath(); ctx.moveTo(0, -17); ctx.lineTo(16, 14); ctx.lineTo(-16, 14); ctx.closePath(); ctx.stroke();
+      ctx.fillRect(-2, -3, 4, 10); ctx.fillRect(-2, 10, 4, 4);
+    } else if (icon === "sword") {
+      ctx.strokeStyle = "#fff0bd";
+      ctx.beginPath(); ctx.moveTo(-10, 15); ctx.lineTo(15, -18); ctx.stroke();
+      ctx.fillRect(-14, 9, 17, 5);
+    } else if (icon === "chain") {
+      ctx.strokeRect(-15, -7, 18, 14); ctx.strokeRect(-3, -7, 18, 14);
+    } else {
+      ctx.fillStyle = "#fff7dc";
+      ctx.fillRect(-12, -15, 24, 30);
+      ctx.fillStyle = "#b88c41";
+      ctx.fillRect(-7, -6, 14, 2); ctx.fillRect(-7, 1, 12, 2); ctx.fillRect(-7, 8, 15, 2);
+    }
+    ctx.restore();
+  }
+
+  function drawTrialCourtFigure(label, x, y, character, prosecutor = false) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = prosecutor ? "#221a12" : "#131118";
+    ctx.fillRect(-82, -18, 164, 58);
+    ctx.strokeStyle = prosecutor ? "#f2cf74" : "#8f7342";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-82, -18, 164, 58);
+    ctx.fillStyle = prosecutor ? "#f2cf74" : "#fff7dc";
+    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.textAlign = "center";
+    ctx.fillText(label, 0, 20);
+    ctx.fillStyle = character === "sukuna" ? "#ff3158" : character === "hakari" ? "#55f087" : character === "higuruma" ? "#f2cf74" : "#8eeaff";
+    ctx.fillRect(-14, -70, 28, 48);
+    ctx.fillStyle = "#f1c0a5";
+    ctx.fillRect(-12, -98, 24, 25);
+    if (prosecutor) {
+      ctx.strokeStyle = "#f2cf74";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(14, -62);
+      ctx.lineTo(62, -78);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawTrialCourtroom() {
     const trial = game.trial;
     if (!trial) return;
     const t = performance.now() * .001;
+    const intro = trial.phase === "startup" ? clamp(1 - trial.timer / Math.max(.1, trial.maxTimer || 2), 0, 1) : 1;
+    const death = trial.punishment === "deathPenalty" && (trial.phase === "verdict" || trial.phase === "resume");
     ctx.save();
-    ctx.fillStyle = "#050407";
-    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = clamp(.28 + intro * .82, .28, 1);
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, "#15100a");
-    grad.addColorStop(.5, "#09070b");
-    grad.addColorStop(1, "#1a1209");
+    grad.addColorStop(0, death ? "#1f0504" : "#17100a");
+    grad.addColorStop(.52, "#050407");
+    grad.addColorStop(1, death ? "#2a0a04" : "#1f1609");
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#f2cf7412";
-    for (let i = 0; i < 18; i++) {
-      const x = (i * 89 + Math.sin(t + i) * 18) % W;
-      const y = 78 + ((i * 47 + t * 21) % 390);
+
+    ctx.strokeStyle = death ? "#ffb23d55" : "#f2cf7448";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 14; i++) {
+      const x = i * 96 + Math.sin(t + i) * 18;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(W / 2 + Math.sin(i) * 110, 420);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#07060add";
+    for (let row = 0; row < 3; row++) {
+      for (let x = 60; x < W; x += 155) {
+        ctx.fillRect(x, 410 + row * 42, 110, 14);
+        ctx.fillRect(x + 8, 424 + row * 42, 10, 36);
+        if ((x + row) % 2 === 0) {
+          ctx.fillStyle = "#f2cf7425";
+          ctx.fillRect(x + 46, 386 + row * 42, 18, 24);
+          ctx.fillStyle = "#07060add";
+        }
+      }
+    }
+    for (let i = 0; i < 8; i++) {
+      const x = 68 + i * 162;
+      ctx.strokeStyle = "#f2cf7440";
+      ctx.strokeRect(x, 90, 62, 405);
+      for (let y = 106; y < 475; y += 42) {
+        ctx.beginPath();
+        ctx.arc(x + 14, y, 8, 0, Math.PI * 2);
+        ctx.arc(x + 48, y + 20, 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    for (let i = 0; i < 20; i++) {
+      ctx.fillStyle = i % 2 ? "#0c0a0e80" : "#f2cf7410";
+      ctx.fillRect(i * 70 - (t * 18 % 70), GROUND - 52 + Math.sin(t * 2 + i) * 8, 86, 18);
+    }
+
+    for (let i = 0; i < 24; i++) {
+      const x = (i * 83 + Math.sin(t * .8 + i) * 38 + W) % W;
+      const y = 90 + ((i * 41 + t * 24) % 330);
       ctx.save();
       ctx.translate(x, y);
-      ctx.rotate(Math.sin(t * 1.3 + i) * .18);
+      ctx.rotate(Math.sin(t + i) * .2);
+      ctx.fillStyle = "#fff7dc22";
       ctx.fillRect(-16, -11, 32, 22);
-      ctx.fillStyle = "#ffffff25";
-      ctx.fillRect(-10, -5, 20, 2);
-      ctx.fillRect(-10, 2, 16, 2);
+      ctx.fillStyle = "#f2cf7445";
+      ctx.fillRect(-10, -4, 20, 2);
+      ctx.fillRect(-10, 3, 15, 2);
       ctx.restore();
-      ctx.fillStyle = "#f2cf7412";
     }
-    ctx.strokeStyle = "#f2cf7455";
+
+    const judgeY = 126 + Math.sin(t * 2.4) * 6;
+    ctx.strokeStyle = "#f2cf7466";
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(W / 2, 62);
-    ctx.lineTo(W / 2, 188);
-    ctx.moveTo(W / 2 - 118, 112);
-    ctx.lineTo(W / 2 + 118, 112);
+    ctx.moveTo(W / 2, 48);
+    ctx.lineTo(W / 2, 190);
+    ctx.moveTo(W / 2 - 145, 104);
+    ctx.lineTo(W / 2 + 145, 104);
     ctx.stroke();
     for (const side of [-1, 1]) {
       ctx.beginPath();
-      ctx.moveTo(W / 2 + side * 92, 112);
-      ctx.lineTo(W / 2 + side * 62, 166);
-      ctx.lineTo(W / 2 + side * 122, 166);
+      ctx.moveTo(W / 2 + side * 112, 104);
+      ctx.lineTo(W / 2 + side * 74, 172);
+      ctx.lineTo(W / 2 + side * 150, 172);
       ctx.closePath();
       ctx.stroke();
     }
-    ctx.fillStyle = "#111017";
-    ctx.fillRect(W / 2 - 190, 188, 380, 96);
+    ctx.fillStyle = "#100e14";
+    ctx.fillRect(W / 2 - 210, 204, 420, 104);
     ctx.strokeStyle = "#f2cf74";
-    ctx.strokeRect(W / 2 - 190, 188, 380, 96);
-    ctx.fillStyle = "#1c1720";
-    ctx.fillRect(W / 2 - 92, 104, 184, 84);
-    ctx.fillStyle = "#f2cf74";
-    ctx.fillRect(W / 2 - 64, 126, 128, 10);
-    ctx.fillRect(W / 2 - 42, 150, 84, 10);
+    ctx.lineWidth = trial.phase === "verdict" ? 7 : 4;
+    ctx.strokeRect(W / 2 - 210, 204, 420, 104);
+    ctx.fillStyle = death ? "#2b0a07" : "#18131b";
+    ctx.fillRect(W / 2 - 105, judgeY - 38, 210, 92);
+    ctx.fillStyle = death ? "#ffb23d" : "#f2cf74";
+    ctx.fillRect(W / 2 - 70, judgeY - 14, 140, 12);
+    ctx.fillRect(W / 2 - 48, judgeY + 12, 96, 12);
     ctx.fillStyle = "#fff7dc";
-    ctx.font = '12px "Press Start 2P", monospace';
-    ctx.textAlign = "center";
-    ctx.fillText("JUDGEMAN", W / 2, 220);
-    ctx.fillStyle = "#f2cf74";
-    ctx.font = '22px "Press Start 2P", monospace';
-    ctx.fillText(trial.phase === "startup" ? "DOMAIN EXPANSION" : "DEADLY SENTENCING", W / 2, 48);
     ctx.font = '10px "Press Start 2P", monospace';
+    ctx.textAlign = "center";
+    ctx.fillText(trial.phase === "verdict" ? "JUDGEMAN DECIDES" : "JUDGEMAN", W / 2, 244);
+    if (trial.phase === "verdict") {
+      ctx.fillStyle = death ? "#ff3d28" : "#fff1a8";
+      ctx.fillRect(W / 2 - 42, judgeY - 4, 24, 8);
+      ctx.fillRect(W / 2 + 18, judgeY - 4, 24, 8);
+    }
+    if (trial.phase === "verdict" || trial.phase === "verdictClash") {
+      ctx.save();
+      ctx.translate(W / 2 + 190, 126);
+      ctx.rotate(Math.sin(t * 8) * .08);
+      ctx.fillStyle = "#f2cf74";
+      ctx.fillRect(-55, -8, 110, 16);
+      ctx.fillRect(-13, -38, 26, 60);
+      ctx.restore();
+    }
+
+    drawTrialCourtFigure("PROSECUTOR", 286, 378, "higuruma", true);
+    drawTrialCourtFigure("DEFENDANT", W - 286, 378, trial.targetCharacter || game.enemy?.character || "sukuna", false);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#f2cf74";
+    ctx.font = '24px "Press Start 2P", monospace';
+    ctx.fillText(trial.phase === "startup" && intro < .55 ? "DOMAIN EXPANSION" : "DEADLY SENTENCING", W / 2, 46);
+    ctx.font = '9px "Press Start 2P", monospace';
     ctx.fillStyle = "#fff7dc";
-    ctx.fillText(trial.message || "COURT IS NOW IN SESSION.", W / 2, 78);
+    ctx.fillText(trial.message || "COURT IS NOW IN SESSION.", W / 2, 76);
+
+    const leftScore = Number(trial.prosecutor || trial.baseProsecutor || 0) + Number(trial.prosecutorBonus || 0);
+    const rightScore = Number(trial.defense || trial.baseDefense || 0) + Number(trial.defenseBonus || 0);
+    ctx.fillStyle = "#0a090dcc";
+    ctx.fillRect(56, 92, 250, 62);
+    ctx.fillRect(W - 306, 92, 250, 62);
+    ctx.strokeStyle = "#f2cf74";
+    ctx.strokeRect(56, 92, 250, 62);
+    ctx.strokeRect(W - 306, 92, 250, 62);
+    ctx.fillStyle = "#f2cf74";
+    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.textAlign = "left";
+    ctx.fillText("HIGURUMA ARGUMENT", 74, 116);
+    ctx.fillText(trial.phase === "verdictClash" ? "MASH A/D" : "PROSECUTION", 74, 140);
+    ctx.textAlign = "right";
+    ctx.fillText("ACCUSED DEFENSE", W - 74, 116);
+    ctx.fillText(trial.phase === "verdictClash" ? "RESIST" : "TESTIMONY", W - 74, 140);
+    ctx.textAlign = "center";
+    const evidence = clamp(Number(trial.evidence || 0) / 100, 0, 1);
+    ctx.fillStyle = "#211709";
+    ctx.fillRect(W / 2 - 180, 92, 360, 18);
+    ctx.fillStyle = evidence > .65 ? "#ffdb66" : evidence > .4 ? "#d49b45" : "#8d6a38";
+    ctx.fillRect(W / 2 - 180, 92, 360 * evidence, 18);
+    ctx.strokeStyle = "#fff7dc66";
+    ctx.strokeRect(W / 2 - 180, 92, 360, 18);
+    ctx.fillStyle = "#fff7dc";
+    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.fillText(`EVIDENCE STRENGTH ${Math.round(evidence * 100)}%`, W / 2, 128);
 
     ctx.textAlign = "left";
     ctx.fillStyle = "#0c0b0fdd";
-    ctx.fillRect(72, 300, W - 144, 118);
+    ctx.fillRect(92, 458, W - 184, 94);
     ctx.strokeStyle = "#f2cf74";
     ctx.lineWidth = 3;
-    ctx.strokeRect(72, 300, W - 144, 118);
+    ctx.strokeRect(92, 458, W - 184, 94);
     ctx.fillStyle = "#f2cf74";
-    ctx.font = '11px "Press Start 2P", monospace';
-    ctx.fillText("CHARGE", 96, 328);
+    ctx.font = '9px "Press Start 2P", monospace';
+    ctx.fillText(`ACCUSED: ${(characters[trial.targetCharacter]?.name || trial.targetCharacter || "UNKNOWN").toUpperCase()}`, 116, 485);
     ctx.fillStyle = "#fff7dc";
-    ctx.font = '10px "Press Start 2P", monospace';
-    const charge = trial.crime || "Preparing evidence...";
-    wrappedLines(charge, 70).slice(0, 3).forEach((line, index) => ctx.fillText(line, 96, 356 + index * 21));
-    const evidence = clamp(Number(trial.evidence || 0) / 100, 0, 1);
-    ctx.fillStyle = "#2a2118";
-    ctx.fillRect(815, 326, 320, 18);
-    ctx.fillStyle = evidence > .65 ? "#ffdb66" : evidence > .4 ? "#d49b45" : "#8d6a38";
-    ctx.fillRect(815, 326, 320 * evidence, 18);
-    ctx.strokeStyle = "#fff7dc55";
-    ctx.strokeRect(815, 326, 320, 18);
-    ctx.fillStyle = "#fff7dc";
-    ctx.fillText(`EVIDENCE ${Math.round(Number(trial.evidence || 0))}`, 815, 368);
+    ctx.font = '9px "Press Start 2P", monospace';
+    wrappedLines(trial.crime || "Preparing evidence...", 88).slice(0, 2).forEach((line, index) => ctx.fillText(line.toUpperCase(), 116, 514 + index * 21));
+
+    if (trial.phase === "verdictClash") {
+      const ratio = clamp(.5 + (leftScore - rightScore) / 120, .12, .88);
+      if (trial.chosenArgument?.text || trial.argument?.text) {
+        ctx.save();
+        ctx.translate(W / 2, 256);
+        ctx.rotate(-.08);
+        ctx.fillStyle = "#050505cc";
+        ctx.fillRect(-430, -28, 860, 56);
+        ctx.strokeStyle = "#f2cf74";
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(-455, 24);
+        ctx.lineTo(455, -24);
+        ctx.stroke();
+        ctx.fillStyle = "#fff0a8";
+        ctx.font = '15px "Press Start 2P", monospace';
+        ctx.textAlign = "center";
+        ctx.fillText(String(trial.chosenArgument?.text || trial.argument?.text || "ARGUMENT").toUpperCase(), 0, 7);
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.translate(W / 2, 320);
+      ctx.rotate((ratio - .5) * .55);
+      ctx.strokeStyle = "#f2cf74";
+      ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(-210, 0); ctx.lineTo(210, 0); ctx.stroke();
+      ctx.fillStyle = "#f2cf74";
+      ctx.fillRect(-10, -72, 20, 140);
+      ctx.restore();
+      ctx.fillStyle = "#0a090ddd";
+      ctx.fillRect(W / 2 - 220, 350, 440, 46);
+      ctx.strokeStyle = "#f2cf74";
+      ctx.strokeRect(W / 2 - 220, 350, 440, 46);
+      ctx.fillStyle = "#fff7dc";
+      ctx.font = '10px "Press Start 2P", monospace';
+      ctx.fillText(`TIP THE SCALE  ${Math.ceil(trial.timer || 0)}`, W / 2, 379);
+    }
 
     const options = trial.phase === "testimony" ? trial.options : trial.phase === "argument" ? trial.argumentOptions : [];
     if (options.length) {
-      ctx.textAlign = "left";
       options.forEach((option, index) => {
-        const y = H - 178 + index * 52;
-        ctx.fillStyle = "#0b0a0dcc";
-        ctx.fillRect(210, y, W - 420, 38);
-        ctx.strokeStyle = "#f2cf74";
-        ctx.strokeRect(210, y, W - 420, 38);
+        const x = 116 + index * 350;
+        const y = H - 138;
+        const hover = game.trialHover === index;
+        ctx.fillStyle = hover ? "#23180eee" : "#0b0a0dcc";
+        ctx.fillRect(x, y, 315, 96);
+        ctx.strokeStyle = hover ? "#fff0a8" : "#f2cf74";
+        ctx.lineWidth = hover ? 5 : 3;
+        ctx.strokeRect(x, y, 315, 96);
+        drawTrialIcon(option.icon, x + 33, y + 32, hover ? "#fff0a8" : "#f2cf74");
         ctx.fillStyle = "#f2cf74";
-        ctx.font = '10px "Press Start 2P", monospace';
-        ctx.fillText(`${index + 1}`, 232, y + 25);
+        ctx.font = '9px "Press Start 2P", monospace';
+        ctx.textAlign = "left";
+        ctx.fillText(`${index + 1} / ${option.risk || "CHOICE"}`, x + 62, y + 28);
         ctx.fillStyle = "#fff7dc";
-        ctx.fillText(option.text.toUpperCase(), 272, y + 25);
+        ctx.font = '8px "Press Start 2P", monospace';
+        wrappedLines(option.text.toUpperCase(), 31).slice(0, 2).forEach((line, row) => ctx.fillText(line, x + 62, y + 50 + row * 15));
+        ctx.fillStyle = "#c9b78d";
+        wrappedLines(option.hint || "", 33).slice(0, 2).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 78 + row * 13));
       });
       const timerRatio = clamp(Number(trial.timer || 0) / Math.max(.1, Number(trial.maxTimer || 8)), 0, 1);
       ctx.fillStyle = "#3b2811";
-      ctx.fillRect(370, H - 22, W - 740, 8);
+      ctx.fillRect(230, H - 22, W - 460, 8);
       ctx.fillStyle = "#f2cf74";
-      ctx.fillRect(370, H - 22, (W - 740) * timerRatio, 8);
+      ctx.fillRect(230, H - 22, (W - 460) * timerRatio, 8);
     }
+
     if (trial.phase === "verdict" || trial.phase === "resume") {
+      const verdict = trialVerdictLabel(trial.verdict || trial.message);
       ctx.textAlign = "center";
-      ctx.fillStyle = "#000000dd";
-      ctx.fillRect(0, H / 2 - 58, W, 116);
-      ctx.strokeStyle = "#f2cf74";
-      ctx.lineWidth = 5;
-      ctx.strokeRect(110, H / 2 - 46, W - 220, 92);
-      ctx.fillStyle = trial.punishment === "deathPenalty" ? "#ffe7a3" : "#f2cf74";
-      ctx.font = '24px "Press Start 2P", monospace';
-      ctx.fillText((trial.verdict || trial.message || "FIGHT").toUpperCase(), W / 2, H / 2 + 10);
-      if (trial.punishment === "confiscation") {
-        ctx.font = '11px "Press Start 2P", monospace';
-        ctx.fillText("TECHNIQUE CONFISCATED", W / 2, H / 2 + 38);
-      } else if (trial.punishment === "deathPenalty") {
-        ctx.font = '11px "Press Start 2P", monospace';
-        ctx.fillText("EXECUTIONER'S SWORD GRANTED", W / 2, H / 2 + 38);
-      }
+      ctx.fillStyle = death ? "#130000e8" : "#000000dd";
+      ctx.fillRect(0, H / 2 - 80, W, 160);
+      ctx.strokeStyle = death ? "#ffb23d" : "#f2cf74";
+      ctx.lineWidth = 7;
+      ctx.strokeRect(96, H / 2 - 62, W - 192, 124);
+      ctx.fillStyle = death ? "#ffd26c" : "#f2cf74";
+      ctx.font = '27px "Press Start 2P", monospace';
+      ctx.fillText(verdict.toUpperCase(), W / 2, H / 2 + 8);
+      ctx.font = '10px "Press Start 2P", monospace';
+      if (trial.punishment === "confiscation") ctx.fillText("TECHNIQUE CONFISCATED", W / 2, H / 2 + 42);
+      else if (trial.punishment === "deathPenalty") ctx.fillText("EXECUTIONER'S SWORD GRANTED", W / 2, H / 2 + 42);
+      else if (trial.punishment === "mistrial") ctx.fillText("PAPERS SCATTER / SCALE CRACKED", W / 2, H / 2 + 42);
+      else if (trial.punishment === "notGuilty") ctx.fillText("CHAINS BREAK", W / 2, H / 2 + 42);
     }
     ctx.restore();
   }
@@ -5742,6 +6044,29 @@
     ctx.restore();
     drawDomainClashTableau();
     drawTrialCourtroom();
+    for (const fighter of [game.player, game.enemy]) {
+      if (fighter?.attack?.type === "executionSword") {
+        const a = fighter.attack;
+        const windup = a.elapsed < a.start;
+        ctx.save();
+        ctx.globalAlpha = windup ? .55 + Math.sin(performance.now() * .03) * .18 : .9;
+        ctx.strokeStyle = windup ? "#f2cf74" : "#050505";
+        ctx.lineWidth = windup ? 2 : 13;
+        ctx.beginPath();
+        ctx.moveTo(fighter.x + fighter.facing * 22, fighter.y - 92);
+        ctx.lineTo(fighter.x + fighter.facing * 270, fighter.y - 128);
+        ctx.stroke();
+        if (!windup) {
+          ctx.strokeStyle = "#f2cf74";
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(fighter.x + fighter.facing * 22, fighter.y - 92);
+          ctx.lineTo(fighter.x + fighter.facing * 270, fighter.y - 128);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
     if (game.blackFlash > 0) {
       const alpha = clamp(game.blackFlash * 1.8, 0, .72);
       ctx.fillStyle = `rgba(0,0,0,${alpha})`;
@@ -5837,10 +6162,13 @@
     if (!game.online.active || !game.player || game.state !== "playing") return null;
     const edges = game.online.inputEdges;
     const trialLocked = Boolean(game.trial && game.trial.phase !== "startup");
+    const trialClashMove = game.trial?.phase === "verdictClash"
+      ? (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0)
+      : 0;
     const domainLocked = game.domainStartup > 0 || localFrozenByUnlimitedVoid() || trialLocked;
     const input = domainLocked
       ? {
-        move: 0, jump: false, dash: false, block: false, charge: false,
+        move: trialClashMove, jump: false, dash: false, block: false, charge: false,
         light: false, heavy: false, special: "", domain: edges.domain, awaken: false, clash: edges.clash,
         trialChoice: edges.trialChoice,
       }
@@ -6000,9 +6328,12 @@
         evidence: Number(event.evidence || 50),
         options: Array.isArray(event.options) ? event.options : [],
         argumentOptions: [],
-        timer: 1.4,
-        maxTimer: 1.4,
-        message: "COURT IS NOW IN SESSION.",
+        timer: Number(event.chargeTicks || 180) / 60,
+        maxTimer: Number(event.chargeTicks || 180) / 60,
+        message: event.line || "COURT IS NOW IN SESSION.",
+        line: event.line || "COURT IS NOW IN SESSION.",
+        prosecutorBonus: 0,
+        defenseBonus: 0,
       };
       game.domainIntro = 0;
       game.cinematic = 0;
@@ -6023,14 +6354,32 @@
         game.trial.chosenArgument = event.choice || null;
         game.trial.message = event.choice?.text || "ARGUMENT ENTERED";
       }
+    } else if (event.kind === "trialVerdictClash") {
+      if (game.trial) {
+        game.trial.phase = "verdictClash";
+        game.trial.baseProsecutor = Number(event.prosecutor || 0);
+        game.trial.baseDefense = Number(event.defense || 0);
+        game.trial.prosecutor = Number(event.prosecutor || 0);
+        game.trial.defense = Number(event.defense || 0);
+        game.trial.prosecutorBonus = 0;
+        game.trial.defenseBonus = 0;
+        game.trial.timer = Number(event.timerTicks || 180) / 60;
+        game.trial.maxTimer = game.trial.timer;
+        game.trial.message = "THE SCALE WILL DECIDE";
+      }
+      announce("VERDICT CLASH");
     } else if (event.kind === "trialVerdict") {
       if (game.trial) {
         game.trial.phase = "verdict";
         game.trial.verdict = event.verdict || "MISTRIAL";
         game.trial.punishment = event.punishment || "none";
-        game.trial.timer = 2.25;
-        game.trial.maxTimer = 2.25;
-        game.trial.message = game.trial.verdict;
+        game.trial.prosecutor = Number(event.prosecutor || game.trial.prosecutor || 0);
+        game.trial.defense = Number(event.defense || game.trial.defense || 0);
+        game.trial.prosecutorBonus = Number(event.prosecutorBonus || game.trial.prosecutorBonus || 0);
+        game.trial.defenseBonus = Number(event.defenseBonus || game.trial.defenseBonus || 0);
+        game.trial.timer = 2;
+        game.trial.maxTimer = 2;
+        game.trial.message = trialVerdictLabel(game.trial.verdict);
       }
       game.shake = 18;
       game.flash = .24;
@@ -6076,7 +6425,7 @@
         game.trial.phase = "resume";
         game.trial.timer = .8;
         game.trial.maxTimer = .8;
-        game.trial.message = "FIGHT";
+        game.trial.message = "READY?";
       }
     } else if (event.kind === "domainActive") {
       game.domainCharacter = event.character || game.domainCharacter;
@@ -6377,7 +6726,9 @@
         online: true,
         timer: Number(snapshot.trial.timer || 0) / 60,
         maxTimer: Number(snapshot.trial.maxTimer || snapshot.trial.timer || 1) / 60,
-        message: snapshot.trial.verdict || (snapshot.trial.phase === "charge" ? "COURT IS NOW IN SESSION." : "CHOOSE OPTION"),
+        message: snapshot.trial.verdict
+          ? trialVerdictLabel(snapshot.trial.verdict)
+          : snapshot.trial.line || (snapshot.trial.phase === "charge" ? "COURT IS NOW IN SESSION." : snapshot.trial.phase === "verdictClash" ? "THE SCALE WILL DECIDE" : "CHOOSE OPTION"),
       };
       game.windPaused = true;
     } else if (snapshot.trial && game.trial) {
@@ -6386,7 +6737,9 @@
         online: true,
         timer: Number(snapshot.trial.timer || 0) / 60,
         maxTimer: Number(snapshot.trial.maxTimer || snapshot.trial.timer || 1) / 60,
-        message: game.trial.message || snapshot.trial.verdict || "COURT IS NOW IN SESSION.",
+        message: snapshot.trial.verdict
+          ? trialVerdictLabel(snapshot.trial.verdict)
+          : snapshot.trial.line || game.trial.message || (snapshot.trial.phase === "verdictClash" ? "THE SCALE WILL DECIDE" : "COURT IS NOW IN SESSION."),
       });
     } else if (!snapshot.trial && game.trial?.online && game.trial.phase !== "resume") {
       game.trial = null;
@@ -6725,15 +7078,8 @@
     if (game.state !== "playing" || game.clash) return;
     event.preventDefault();
     if (game.trial) {
-      const rect = canvas.getBoundingClientRect();
-      const x = (event.clientX - rect.left) * (W / rect.width);
-      const y = (event.clientY - rect.top) * (H / rect.height);
       const trial = game.trial;
-      const options = trial.phase === "testimony" ? trial.options : trial.phase === "argument" ? trial.argumentOptions : [];
-      options.forEach((_, index) => {
-        const boxY = H - 178 + index * 52;
-        if (x >= 210 && x <= W - 210 && y >= boxY && y <= boxY + 38) chooseTrialOption(index);
-      });
+      if ((trial.phase === "testimony" || trial.phase === "argument") && game.trialHover >= 0) chooseTrialOption(game.trialHover);
       return;
     }
     if (event.button === 0) {
@@ -6747,6 +7093,26 @@
   });
 
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+  canvas.addEventListener("mousemove", (event) => {
+    if (!game.trial) {
+      game.trialHover = -1;
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (W / rect.width);
+    const y = (event.clientY - rect.top) * (H / rect.height);
+    game.trialHover = -1;
+    if (game.trial.phase !== "testimony" && game.trial.phase !== "argument") return;
+    for (let index = 0; index < 3; index++) {
+      const cardX = 116 + index * 350;
+      const cardY = H - 138;
+      if (x >= cardX && x <= cardX + 315 && y >= cardY && y <= cardY + 96) {
+        game.trialHover = index;
+        break;
+      }
+    }
+  });
 
   $$(".mode").forEach((button) => button.addEventListener("click", () => {
     $$(".mode").forEach((b) => b.classList.remove("active"));
