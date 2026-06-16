@@ -172,7 +172,7 @@
       correctionY: 0,
       inputEdges: {
         jump: false, dash: false, light: false, heavy: false,
-        special: "", specialRelease: "", fuga: false, domain: false, awaken: false,
+        special: "", specialRelease: "", fuga: false, domain: false, awaken: false, clash: 0,
       },
       stats: { damage: 0, parries: 0, blackFlashes: 0, domains: 0 },
     },
@@ -674,7 +674,7 @@
     game.domainPrevious = 0;
     game.online.inputEdges = {
       jump: false, dash: false, light: false, heavy: false,
-      special: "", specialRelease: "", fuga: false, domain: false, awaken: false,
+      special: "", specialRelease: "", fuga: false, domain: false, awaken: false, clash: 0,
     };
     game.online.stats = { damage: 0, parries: 0, blackFlashes: 0, domains: 0 };
     game.time = Number(options.time) || 99;
@@ -2635,7 +2635,22 @@
   function beginClash(type, domain, kind = "power", remoteStart = false) {
     if (game.clash) return;
     const hakari = domain && game.player.character === "hakari";
-    game.clash = { timer: domain ? 4 : 3.2, maxTimer: domain ? 4 : 3.2, power: 50, lastKey: "", domain, kind, pulse: 0, hakari };
+    const opponentCharacter = game.online.active
+      ? (game.online.remoteCharacter || game.enemy.character || "sukuna")
+      : game.player.character === "gojo" ? "sukuna" : "gojo";
+    game.clash = {
+      timer: domain ? 4 : 3.2,
+      maxTimer: domain ? 4 : 3.2,
+      power: 50,
+      displayPower: 50,
+      lastKey: "",
+      domain,
+      kind,
+      pulse: 0,
+      hakari,
+      leftCharacter: game.player.character,
+      rightCharacter: opponentCharacter,
+    };
     game.cinematic = 0;
     game.player.attack = null;
     game.enemy.attack = null;
@@ -2643,6 +2658,7 @@
     game.enemy.vx = 0;
     ui.clashType.textContent = type;
     ui.clash.classList.remove("hidden");
+    ui.clash.classList.toggle("domain-clash", domain);
     game.shake = 10;
     game.cameraTarget = 1.24;
     game.cameraFocusX = (game.player.x + game.enemy.x) / 2;
@@ -2661,13 +2677,18 @@
   function updateClash(dt) {
     const c = game.clash;
     if (!c) return;
-    c.timer -= dt;
+    const authoritative = game.online.active && game.online.authoritative;
+    if (!authoritative) c.timer -= dt;
     c.pulse -= dt;
-    const enemyPressure = game.online.active ? 0 : difficulty === "easy" ? 4.6 : difficulty === "hard" ? 8.2 : 6.2;
-    c.power -= dt * enemyPressure * (c.domain ? 1.2 : 1);
-    c.power = clamp(c.power, 0, 100);
-    ui.clashPlayer.style.width = `${c.power}%`;
-    ui.clashEnemy.style.width = `${100 - c.power}%`;
+    if (!authoritative) {
+      const enemyPressure = game.online.active ? 0 : difficulty === "easy" ? 4.6 : difficulty === "hard" ? 8.2 : 6.2;
+      c.power -= dt * enemyPressure * (c.domain ? 1.2 : 1);
+      c.power = clamp(c.power, 0, 100);
+    }
+    c.displayPower = lerp(Number(c.displayPower ?? 50), c.power, clamp(dt * 14, 0, 1));
+    ui.clashPlayer.style.width = `${c.displayPower}%`;
+    ui.clashEnemy.style.width = `${100 - c.displayPower}%`;
+    ui.clash.style.setProperty("--clash-split", `${c.displayPower}%`);
     game.shake = Math.max(game.shake, 5 + (1 - c.timer / c.maxTimer) * 11);
     game.cameraTarget = 1.24 + (1 - c.timer / c.maxTimer) * .12;
     if (c.pulse <= 0) {
@@ -2677,7 +2698,7 @@
         if (prop.hp > 0) prop.hp -= c.domain ? 2.2 : 1.2;
       });
     }
-    if (c.timer <= 0 || c.power <= 0 || c.power >= 100) resolveClash(c.power >= 50);
+    if (!authoritative && (c.timer <= 0 || c.power <= 0 || c.power >= 100)) resolveClash(c.power >= 50);
   }
 
   function clashInput(key) {
@@ -2685,7 +2706,9 @@
     if (!c || (key !== "a" && key !== "d") || c.lastKey === key) return;
     c.lastKey = key;
     c.power = clamp(c.power + 4.6, 0, 100);
-    if (game.online.active) sendOnline("clash", { kind: "input" });
+    c.displayPower = clamp(Number(c.displayPower ?? c.power) + 2.3, 0, 100);
+    if (game.online.active && game.online.authoritative) queueOnlineEdge("clash", key === "a" ? -1 : 1);
+    else if (game.online.active) sendOnline("clash", { kind: "input" });
     game.shake = 5;
     spawnParticles(W / 2 + rnd(-60, 60), H / 2 + rnd(-40, 40), key === "a" ? "#62eaff" : "#8a6bff", 5, 260, 5, .35);
     tone(key === "a" ? 310 : 390, .045, "square", .12, 40);
@@ -2696,6 +2719,7 @@
     const hakariClash = game.clash.hakari;
     game.clash = null;
     ui.clash.classList.add("hidden");
+    ui.clash.classList.remove("domain-clash");
     game.flash = .24;
     game.shake = 18;
     game.cameraTarget = 1;
@@ -4286,7 +4310,203 @@
     ctx.restore();
   }
 
+  function drawDomainClashPose(character, x, y, facing = 1, scale = 1) {
+    const skin = character === "sukuna" ? "#d7a08f" : character === "hakari" ? "#bd856f" : "#d9aaa0";
+    const hair = character === "sukuna" ? "#ef9eae" : character === "hakari" ? "#d8c080" : "#edfaff";
+    const coat = character === "sukuna" ? "#eee6d8" : character === "hakari" ? "#302448" : "#101725";
+    const accent = character === "sukuna" ? "#8e1835" : character === "hakari" ? "#55f087" : "#61eaff";
+    ctx.save();
+    ctx.translate(Math.round(x), Math.round(y));
+    ctx.scale(facing * scale, scale);
+    ctx.fillStyle = "#05060a88";
+    ctx.beginPath();
+    ctx.ellipse(0, 5, 42, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    pixelRect(-18, -66, 14, 66, "#13131a");
+    pixelRect(4, -66, 14, 66, "#13131a");
+    pixelRect(-24, -136, 48, 76, coat);
+    if (character === "sukuna") {
+      pixelRect(-8, -134, 16, 69, "#24202c");
+      pixelRect(-4, -131, 8, 62, accent);
+    } else if (character === "hakari") {
+      pixelRect(-15, -132, 30, 65, "#e7e0d5");
+      pixelRect(-3, -128, 6, 46, "#d6ab45");
+    }
+    pixelRect(-17, -170, 34, 35, skin);
+    if (character === "gojo") {
+      pixelRect(-19, -180, 8, 19, hair);
+      pixelRect(-13, -187, 8, 25, hair);
+      pixelRect(-5, -190, 9, 28, hair);
+      pixelRect(4, -187, 9, 25, hair);
+      pixelRect(12, -181, 8, 20, hair);
+      pixelRect(-16, -164, 32, 8, "#101a31");
+      pixelRect(-26, -143, 12, 76, coat);
+      pixelRect(-27, -151, 11, 12, skin);
+      pixelRect(17, -209, 12, 77, coat);
+      pixelRect(18, -215, 11, 13, skin);
+      pixelRect(21, -225, 4, 13, skin);
+      pixelRect(27, -225, 4, 13, skin);
+      pixelRect(-30, -153, 4, 13, accent);
+      pixelRect(28, -218, 4, 10, accent);
+    } else if (character === "sukuna") {
+      pixelRect(-18, -181, 8, 20, hair);
+      pixelRect(-11, -188, 9, 27, hair);
+      pixelRect(-3, -191, 10, 30, hair);
+      pixelRect(6, -187, 10, 26, hair);
+      pixelRect(14, -181, 7, 20, hair);
+      pixelRect(-13, -165, 10, 4, "#28050e");
+      pixelRect(4, -165, 10, 4, "#28050e");
+      pixelRect(-15, -155, 8, 3, "#28050e");
+      pixelRect(7, -155, 8, 3, "#28050e");
+      pixelRect(-29, -145, 13, 64, coat);
+      pixelRect(16, -145, 13, 64, coat);
+      pixelRect(-27, -151, 10, 13, skin);
+      pixelRect(17, -151, 10, 13, skin);
+      pixelRect(-11, -146, 11, 42, coat);
+      pixelRect(1, -146, 11, 42, coat);
+      pixelRect(-10, -151, 9, 12, skin);
+      pixelRect(2, -151, 9, 12, skin);
+      pixelRect(-5, -156, 3, 10, "#28050e");
+      pixelRect(3, -156, 3, 10, "#28050e");
+    } else {
+      pixelRect(-19, -179, 9, 18, hair);
+      pixelRect(-12, -187, 10, 26, hair);
+      pixelRect(-4, -191, 11, 30, hair);
+      pixelRect(5, -188, 11, 27, hair);
+      pixelRect(14, -181, 8, 20, hair);
+      pixelRect(-13, -165, 10, 4, "#241a1c");
+      pixelRect(4, -165, 11, 4, "#241a1c");
+      pixelRect(-31, -145, 14, 65, coat);
+      pixelRect(17, -145, 14, 65, coat);
+      pixelRect(-28, -151, 10, 13, skin);
+      pixelRect(18, -151, 10, 13, skin);
+      pixelRect(-12, -148, 10, 45, coat);
+      pixelRect(2, -148, 10, 45, coat);
+      pixelRect(-10, -154, 9, 12, skin);
+      pixelRect(2, -154, 9, 12, skin);
+      pixelRect(-4, -159, 3, 10, accent);
+      pixelRect(4, -159, 3, 10, accent);
+    }
+    ctx.restore();
+  }
+
+  function drawDomainClashSide(character, left, right, isLeft) {
+    const width = Math.max(1, right - left);
+    const center = left + width * .5;
+    const t = performance.now() * .001;
+    if (character === "sukuna") {
+      ctx.fillStyle = "#170208";
+      ctx.fillRect(left, 0, width, H);
+      ctx.fillStyle = "#3c0715";
+      ctx.fillRect(left, GROUND - 118, width, 118);
+      const shrineW = Math.min(330, width * .72);
+      const shrineX = center - shrineW / 2;
+      ctx.fillStyle = "#25040d";
+      ctx.fillRect(shrineX, GROUND - 235, shrineW, 235);
+      ctx.fillStyle = "#690f27";
+      ctx.fillRect(shrineX - 24, GROUND - 210, shrineW + 48, 24);
+      ctx.fillRect(shrineX + shrineW * .12, GROUND - 274, shrineW * .76, 42);
+      ctx.fillStyle = "#120207";
+      for (let i = 0; i < 7; i++) {
+        ctx.fillRect(shrineX + 18 + i * Math.max(18, (shrineW - 44) / 7), GROUND - 181, 11, 181);
+      }
+      ctx.strokeStyle = "#ff315899";
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 14; i++) {
+        const y = 95 + (i * 43 + t * 180) % 430;
+        ctx.beginPath();
+        ctx.moveTo(left + (i * 71) % width, y);
+        ctx.lineTo(left + ((i * 113 + 170) % width), y - 45);
+        ctx.stroke();
+      }
+      drawDomainClashPose("sukuna", center, GROUND - 246, isLeft ? 1 : -1, .82);
+    } else if (character === "hakari") {
+      ctx.fillStyle = "#06130d";
+      ctx.fillRect(left, 0, width, H);
+      ctx.fillStyle = "#142d25";
+      ctx.fillRect(left, 90, width, 34);
+      ctx.fillRect(left, GROUND - 84, width, 84);
+      ctx.fillStyle = "#326f4d";
+      ctx.fillRect(left, GROUND - 91, width, 7);
+      for (let i = 0; i < 6; i++) {
+        const x = left + ((i * 118 - t * 90) % (width + 118));
+        ctx.fillStyle = i % 2 ? "#5cff8c" : "#fff35d";
+        ctx.fillRect(x, 72, 72, 10);
+        ctx.fillStyle = "#183b2b";
+        ctx.fillRect(x + 8, 142, 88, 112);
+        ctx.fillStyle = "#9dfbc155";
+        ctx.fillRect(x + 15, 150, 30, 94);
+        ctx.fillRect(x + 56, 150, 30, 94);
+      }
+      const numbers = [7, 3, 7];
+      numbers.forEach((number, index) => {
+        const boxX = center - 112 + index * 76;
+        ctx.fillStyle = "#050907dd";
+        ctx.fillRect(boxX - 28, 278, 56, 62);
+        ctx.strokeStyle = index === 1 ? "#fff35d" : "#58ff8c";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(boxX - 28, 278, 56, 62);
+        ctx.fillStyle = number === 7 ? "#fff35d" : "#d9ffe5";
+        ctx.textAlign = "center";
+        ctx.font = '25px "Press Start 2P", monospace';
+        ctx.fillText(String(number), boxX, 321);
+      });
+      drawDomainClashPose("hakari", center, GROUND - 8, isLeft ? 1 : -1, .9);
+    } else {
+      ctx.fillStyle = "#01010c";
+      ctx.fillRect(left, 0, width, H);
+      for (let i = 0; i < 72; i++) {
+        const x = left + ((i * 83 + Math.sin(i * 4.7) * 120) % width + width) % width;
+        const y = (i * 59 + t * (9 + i % 4)) % H;
+        pixelRect(x, y, i % 13 === 0 ? 4 : 2, i % 13 === 0 ? 4 : 2, i % 5 ? "#bcecff" : "#9974ff");
+      }
+      ctx.strokeStyle = "#796cff55";
+      ctx.lineWidth = 4;
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.arc(center, 310, 80 + i * 46 + Math.sin(t + i) * 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 5; i++) {
+        const eyeX = left + width * (.16 + i * .17);
+        const eyeY = 110 + (i % 2) * 84;
+        ctx.fillStyle = "#e9f7ff";
+        ctx.beginPath();
+        ctx.ellipse(eyeX, eyeY, 24, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#725cff";
+        ctx.beginPath();
+        ctx.arc(eyeX, eyeY, 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      drawDomainClashPose("gojo", center, GROUND - 5, isLeft ? 1 : -1, .95);
+    }
+    const label = character === "sukuna" ? "MALEVOLENT SHRINE" : character === "hakari" ? "IDLE DEATH GAMBLE" : "UNLIMITED VOID";
+    ctx.textAlign = "center";
+    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.fillStyle = character === "sukuna" ? "#ff7892" : character === "hakari" ? "#dfff63" : "#c9f7ff";
+    ctx.fillText(label, center, 145);
+  }
+
+  function drawDomainClashTableau() {
+    const c = game.clash;
+    if (!c?.domain) return;
+    const split = clamp(W * Number(c.displayPower ?? c.power ?? 50) / 100, W * .18, W * .82);
+    ctx.save();
+    drawDomainClashSide(c.leftCharacter || "gojo", 0, split, true);
+    drawDomainClashSide(c.rightCharacter || "sukuna", split, W, false);
+    ctx.fillStyle = "#ffffff";
+    for (let y = -20; y < H + 40; y += 34) {
+      const offset = Math.sin(y * .045 + performance.now() * .01) * 10;
+      ctx.fillRect(split - 3 + offset, y, 6, 24);
+    }
+    ctx.fillStyle = "#ffffff22";
+    ctx.fillRect(split - 20, 0, 40, H);
+    ctx.restore();
+  }
+
   function drawDomain() {
+    if (game.clash?.domain) return;
     if (game.domain <= 0 && game.domainIntro <= 0 && !game.clash?.domain) return;
     const intro = game.domainIntro;
     const opacity = intro > 0 ? clamp((2.35 - intro) * .7, 0, .9) : .9;
@@ -4470,6 +4690,7 @@
       drawCinematic();
     }
     ctx.restore();
+    drawDomainClashTableau();
     if (game.blackFlash > 0) {
       const alpha = clamp(game.blackFlash * 1.8, 0, .72);
       ctx.fillStyle = `rgba(0,0,0,${alpha})`;
@@ -4568,7 +4789,7 @@
     const input = domainLocked
       ? {
         move: 0, jump: false, dash: false, block: false, charge: false,
-        light: false, heavy: false, special: "", domain: edges.domain, awaken: false,
+        light: false, heavy: false, special: "", domain: edges.domain, awaken: false, clash: edges.clash,
       }
       : {
         move: (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0),
@@ -4584,10 +4805,11 @@
         fuga: edges.fuga,
         domain: edges.domain,
         awaken: edges.awaken,
+        clash: edges.clash,
       };
     game.online.inputEdges = {
       jump: false, dash: false, light: false, heavy: false,
-      special: "", specialRelease: "", fuga: false, domain: false, awaken: false,
+      special: "", specialRelease: "", fuga: false, domain: false, awaken: false, clash: 0,
     };
     game.online.predictionHistory.set(frame, {
       x: game.player.x,
@@ -4942,6 +5164,8 @@
     if (snapshot.clash && game.clash) {
       game.clash.power = game.online.slot === 1 ? snapshot.clash.power : 100 - snapshot.clash.power;
       game.clash.timer = snapshot.clash.ticks / 60;
+      game.clash.leftCharacter = local.character;
+      game.clash.rightCharacter = remote.character;
     } else if (!snapshot.clash && game.clash) {
       game.clash = null;
       ui.clash.classList.add("hidden");
