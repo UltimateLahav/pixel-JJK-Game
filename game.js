@@ -1741,6 +1741,41 @@
   function startDeadlySentencing() {
     const p = game.player;
     if (!p || p.character !== "higuruma") return;
+    if (game.online.active && game.online.authoritative) {
+      if (p.energy < 100 || p.cooldowns.domain > 0 || p.moveConfiscation > 0) {
+        if (p.moveConfiscation > 0) announce("CONFISCATED");
+        return;
+      }
+      p.trialStartup = 2;
+      p.trialStartupHealth = p.health;
+      p.vx = 0;
+      p.attack = null;
+      p.state = "domainPose";
+      game.trial = {
+        phase: "startup",
+        online: true,
+        casterSlot: game.online.slot,
+        targetSlot: game.online.slot === 1 ? 2 : 1,
+        timer: 2,
+        maxTimer: 2,
+        message: "DOMAIN EXPANSION: DEADLY SENTENCING",
+        options: [],
+        argumentOptions: [],
+        chosenDialogue: null,
+        chosenArgument: null,
+      };
+      game.domainCharacter = "higuruma";
+      game.domainOwnerSlot = game.online.slot;
+      game.domainStartup = 2;
+      game.domainIntro = 2;
+      game.cinematic = 2;
+      game.glitch = .7;
+      game.windPaused = true;
+      announce("DOMAIN EXPANSION: DEADLY SENTENCING");
+      tone(95, .45, "square", .25, 180);
+      noise(.18, .4);
+      return;
+    }
     p.trialStartup = 2;
     p.trialStartupHealth = p.health;
     p.vx = 0;
@@ -1989,6 +2024,11 @@
       game.cameraTarget = trial.phase === "startup" || trial.phase === "verdict" ? 1.25 : trial.phase === "argument" || trial.phase === "testimony" ? 1.14 : 1.04;
     }
     if (trial.phase === "startup") {
+      if (game.online.active && game.online.authoritative) {
+        trial.timer = Math.max(0, trial.timer - dt);
+        clearTrialCombatMotion();
+        return true;
+      }
       const p = game.player;
       if (!p || p.stun > 0 || p.health < p.trialStartupHealth - .1) {
         failDeadlySentencing("DOMAIN BROKEN");
@@ -2005,9 +2045,18 @@
       trial.timer = Math.max(0, trial.timer - dt);
       if (trial.phase === "resume" && trial.timer <= 0) {
         game.trial = null;
+        game.domainIntro = 0;
+        game.domainStartup = 0;
+        game.cinematic = 0;
         game.windPaused = false;
         game.domainOwnerSlot = 0;
+        game.trialHover = -1;
+        for (const fighter of [game.player, game.enemy]) {
+          if (fighter && fighter.state === "judged") fighter.state = "idle";
+        }
         announce("FIGHT");
+      } else if (trial.phase === "resume" && trial.timer <= .45) {
+        trial.message = "FIGHT";
       }
       return true;
     }
@@ -6332,6 +6381,10 @@
         maxTimer: Number(event.chargeTicks || 180) / 60,
         message: event.line || "COURT IS NOW IN SESSION.",
         line: event.line || "COURT IS NOW IN SESSION.",
+        chosenDialogue: null,
+        chosenArgument: null,
+        dialogue: null,
+        argument: null,
         prosecutorBonus: 0,
         defenseBonus: 0,
       };
@@ -6343,6 +6396,7 @@
       if (game.trial) {
         game.trial.phase = "argument";
         game.trial.chosenDialogue = event.choice || null;
+        game.trial.dialogue = event.choice || null;
         game.trial.argumentOptions = Array.isArray(event.argumentOptions) ? event.argumentOptions : [];
         game.trial.timer = Number(event.timerTicks || 480) / 60;
         game.trial.maxTimer = game.trial.timer;
@@ -6352,6 +6406,7 @@
     } else if (event.kind === "trialArgumentChoice") {
       if (game.trial) {
         game.trial.chosenArgument = event.choice || null;
+        game.trial.argument = event.choice || null;
         game.trial.message = event.choice?.text || "ARGUMENT ENTERED";
       }
     } else if (event.kind === "trialVerdictClash") {
@@ -6421,12 +6476,23 @@
       caster.executionSwordUsed = false;
       announce(event.slot === game.online.slot ? "SWORD EXPIRED" : "OPPONENT SWORD EXPIRED");
     } else if (event.kind === "trialPunishmentEnd") {
-      if (game.trial) {
-        game.trial.phase = "resume";
-        game.trial.timer = .8;
-        game.trial.maxTimer = .8;
-        game.trial.message = "READY?";
-      }
+      game.trial = {
+        ...(game.trial || {}),
+        phase: "resume",
+        online: true,
+        casterSlot: Number(event.casterSlot || game.trial?.casterSlot || 0),
+        targetSlot: Number(event.targetSlot || game.trial?.targetSlot || 0),
+        punishment: event.punishment || game.trial?.punishment || "none",
+        timer: .8,
+        maxTimer: .8,
+        message: "READY?",
+        options: [],
+        argumentOptions: [],
+      };
+      game.domainIntro = 0;
+      game.domainStartup = 0;
+      game.cinematic = 0;
+      game.windPaused = true;
     } else if (event.kind === "domainActive") {
       game.domainCharacter = event.character || game.domainCharacter;
       game.domainOwnerSlot = Number(event.slot || game.domainOwnerSlot);
@@ -6547,6 +6613,38 @@
 
   function applyAuthoritativeSnapshot(snapshot) {
     if (!snapshot || !game.online.active || !game.player || !game.enemy) return;
+    const normalizeTrialSnapshot = (trial) => {
+      if (!trial) return null;
+      const chosenDialogue = trial.chosenDialogue || trial.dialogue || null;
+      const chosenArgument = trial.chosenArgument || trial.argument || null;
+      const line = trial.line || "";
+      return {
+        ...trial,
+        online: true,
+        options: Array.isArray(trial.options) ? trial.options : [],
+        argumentOptions: Array.isArray(trial.argumentOptions) ? trial.argumentOptions : [],
+        dialogue: chosenDialogue,
+        argument: chosenArgument,
+        chosenDialogue,
+        chosenArgument,
+        line,
+        timer: Number(trial.timer || 0) / 60,
+        maxTimer: Number(trial.maxTimer || trial.timer || 1) / 60,
+        message: trial.verdict
+          ? trialVerdictLabel(trial.verdict)
+          : line || (trial.phase === "charge"
+            ? "COURT IS NOW IN SESSION."
+            : trial.phase === "testimony"
+              ? "CHOOSE TESTIMONY"
+              : trial.phase === "argument"
+                ? "CHOOSE ARGUMENT"
+                : trial.phase === "verdictClash"
+                  ? "THE SCALE WILL DECIDE"
+                  : trial.phase === "resume"
+                    ? "READY?"
+                    : "DOMAIN EXPANSION: DEADLY SENTENCING"),
+      };
+    };
     const local = snapshot.players?.[game.online.slot];
     const remoteSlot = game.online.slot === 1 ? 2 : 1;
     const remote = snapshot.players?.[remoteSlot];
@@ -6720,30 +6818,20 @@
       game.clash = null;
       ui.clash.classList.add("hidden");
     }
-    if (snapshot.trial && !game.trial) {
-      game.trial = {
-        ...snapshot.trial,
-        online: true,
-        timer: Number(snapshot.trial.timer || 0) / 60,
-        maxTimer: Number(snapshot.trial.maxTimer || snapshot.trial.timer || 1) / 60,
-        message: snapshot.trial.verdict
-          ? trialVerdictLabel(snapshot.trial.verdict)
-          : snapshot.trial.line || (snapshot.trial.phase === "charge" ? "COURT IS NOW IN SESSION." : snapshot.trial.phase === "verdictClash" ? "THE SCALE WILL DECIDE" : "CHOOSE OPTION"),
-      };
+    const snapshotTrial = normalizeTrialSnapshot(snapshot.trial);
+    if (snapshotTrial && !game.trial) {
+      game.trial = snapshotTrial;
       game.windPaused = true;
-    } else if (snapshot.trial && game.trial) {
-      Object.assign(game.trial, {
-        ...snapshot.trial,
-        online: true,
-        timer: Number(snapshot.trial.timer || 0) / 60,
-        maxTimer: Number(snapshot.trial.maxTimer || snapshot.trial.timer || 1) / 60,
-        message: snapshot.trial.verdict
-          ? trialVerdictLabel(snapshot.trial.verdict)
-          : snapshot.trial.line || game.trial.message || (snapshot.trial.phase === "verdictClash" ? "THE SCALE WILL DECIDE" : "COURT IS NOW IN SESSION."),
-      });
-    } else if (!snapshot.trial && game.trial?.online && game.trial.phase !== "resume") {
+    } else if (snapshotTrial && game.trial) {
+      Object.assign(game.trial, snapshotTrial);
+      game.windPaused = true;
+    } else if (!snapshotTrial && game.trial?.online && game.trial.phase !== "resume") {
       game.trial = null;
       game.windPaused = false;
+      game.domainIntro = 0;
+      game.domainStartup = 0;
+      game.cinematic = 0;
+      game.trialHover = -1;
     }
     for (const event of snapshot.events || []) displayAuthoritativeEvent(event);
   }
@@ -7079,7 +7167,21 @@
     event.preventDefault();
     if (game.trial) {
       const trial = game.trial;
-      if ((trial.phase === "testimony" || trial.phase === "argument") && game.trialHover >= 0) chooseTrialOption(game.trialHover);
+      if (trial.phase === "testimony" || trial.phase === "argument") {
+        const rect = canvas.getBoundingClientRect();
+        const x = (event.clientX - rect.left) * (W / rect.width);
+        const y = (event.clientY - rect.top) * (H / rect.height);
+        let clicked = game.trialHover;
+        for (let index = 0; index < 3; index++) {
+          const cardX = 116 + index * 350;
+          const cardY = H - 138;
+          if (x >= cardX && x <= cardX + 315 && y >= cardY && y <= cardY + 96) {
+            clicked = index;
+            break;
+          }
+        }
+        if (clicked >= 0) chooseTrialOption(clicked);
+      }
       return;
     }
     if (event.button === 0) {
