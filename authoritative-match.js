@@ -4,7 +4,7 @@ const TICK_RATE = 60;
 const TICK_MS = 1000 / TICK_RATE;
 const GROUND = 596;
 const MAX_HEALTH = 600;
-const MAX_ROLLBACK = 15;
+const MAX_ROLLBACK = 60;
 const SNAPSHOT_INTERVAL = 3;
 const DOMAIN_STARTUP_TICKS = 141;
 const EMPTY_INPUT = Object.freeze({
@@ -1629,7 +1629,18 @@ class AuthoritativeMatch {
     this.clash.power = clamp(this.clash.power, 0, 100);
     if (this.clash.ticks <= 0 || this.clash.power <= 0 || this.clash.power >= 100) {
       const domainClash = this.clash.type === "domain";
-      const winner = this.clash.power >= 50 ? this.players[1] : this.players[2];
+      const tied = Math.abs(this.clash.power - 50) < 0.001;
+      if (tied) {
+        for (const player of Object.values(this.players)) {
+          player.domainStartupTicks = 0;
+          player.pendingDomainTicks = 0;
+          player.stun = Math.max(player.stun, 54);
+        }
+        this.events.push({ kind: "clashResult", winnerSlot: 0, draw: true, tick: this.tick });
+        this.clash = null;
+        return;
+      }
+      const winner = this.clash.power > 50 ? this.players[1] : this.players[2];
       const loser = winner.slot === 1 ? this.players[2] : this.players[1];
       if (domainClash && winner.character === "hakari") {
         winner.jackpotTicks = 2280;
@@ -1662,7 +1673,7 @@ class AuthoritativeMatch {
     const p1 = this.players[1];
     const p2 = this.players[2];
     if (p1.health > 0 && p2.health > 0 && remainingTicks > 0) return;
-    const winnerSlot = p1.health === p2.health ? 1 : p1.health > p2.health ? 1 : 2;
+    const winnerSlot = p1.health === p2.health ? 0 : p1.health > p2.health ? 1 : 2;
     this.result = {
       winnerSlot,
       endedAt: Date.now(),
