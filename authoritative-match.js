@@ -1677,6 +1677,33 @@ class AuthoritativeMatch {
   }
 
   snapshot(consumeEvents = false) {
+    const serializeTrial = (trial) => trial ? ({
+      phase: trial.phase,
+      timer: trial.timer,
+      maxTimer: trial.maxTimer,
+      casterSlot: trial.casterSlot,
+      targetSlot: trial.targetSlot,
+      targetCharacter: trial.targetCharacter,
+      crime: trial.crime,
+      evidence: trial.evidence,
+      options: Array.isArray(trial.options) ? clone(trial.options) : [],
+      argumentOptions: Array.isArray(trial.argumentOptions) ? clone(trial.argumentOptions) : [],
+      dialogue: trial.dialogue ? clone(trial.dialogue) : null,
+      argument: trial.argument ? clone(trial.argument) : null,
+      chosenDialogue: trial.dialogue ? clone(trial.dialogue) : null,
+      chosenArgument: trial.argument ? clone(trial.argument) : null,
+      verdict: trial.verdict || "",
+      punishment: trial.punishment || "none",
+      prosecutor: Number(trial.prosecutor || 0),
+      defense: Number(trial.defense || 0),
+      baseProsecutor: Number(trial.baseProsecutor || trial.prosecutor || 0),
+      baseDefense: Number(trial.baseDefense || trial.defense || 0),
+      prosecutorBonus: Number(trial.prosecutorBonus || 0),
+      defenseBonus: Number(trial.defenseBonus || 0),
+      delta: Number(trial.delta || 0),
+      severe: Boolean(trial.severe),
+      line: trial.line || "",
+    }) : null;
     const serializePlayer = (player) => ({
       slot: player.slot,
       character: player.character,
@@ -1729,7 +1756,7 @@ class AuthoritativeMatch {
       players: { 1: serializePlayer(this.players[1]), 2: serializePlayer(this.players[2]) },
       projectiles: this.projectiles.map((projectile) => ({ ...projectile })),
       clash: this.clash ? { ...this.clash } : null,
-      trial: this.trial ? { ...this.trial } : null,
+      trial: serializeTrial(this.trial),
       events: consumeEvents ? this.events.splice(0) : clone(this.events),
       result: this.result,
     };
