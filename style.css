@@ -44,8 +44,8 @@ button { font: inherit; }
   pointer-events: none;
   position: absolute;
   inset: 0;
-  z-index: 20;
-  background: repeating-linear-gradient(0deg, transparent 0 3px, #0002 3px 4px);
+  z-index: 4;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, #0001 3px 4px);
   mix-blend-mode: multiply;
 }
 
