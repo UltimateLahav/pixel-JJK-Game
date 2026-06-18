@@ -148,6 +148,8 @@
     hakariDomain: null,
     trial: null,
     trialHover: -1,
+    trialDebugPhase: "",
+    trialOptionWarning: "",
     jackpotFlash: 0,
     online: {
       active: false,
@@ -1812,11 +1814,7 @@
       p.trialStartup = 0;
       p.state = "hit";
     }
-    game.trial = null;
-    game.domainIntro = 0;
-    game.domainStartup = 0;
-    game.domainOwnerSlot = 0;
-    game.windPaused = false;
+    clearTrialState();
     announce(reason);
     tone(60, .15, "square", .18, -120);
   }
@@ -1889,37 +1887,119 @@
     return Math.max(0, ids.indexOf(found));
   }
 
+  function trialCardRect(index) {
+    return { x: 116 + index * 350, y: H - 138, w: 315, h: 96 };
+  }
+
+  function canvasPointFromMouse(event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) * (canvas.width / rect.width),
+      y: (event.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  }
+
+  function selectableTrialPhase(trial = game.trial) {
+    return Boolean(trial && (trial.phase === "testimony" || trial.phase === "argument"));
+  }
+
   function visibleTrialChoice(trial = game.trial) {
     if (!trial) return { phase: "", options: [] };
-    const phase = trial.choicePhase || trial.phase;
+    const phase = selectableTrialPhase(trial) ? trial.phase : "";
     const testimonyOptions = Array.isArray(trial.options) ? trial.options : [];
     const argumentOptions = Array.isArray(trial.argumentOptions) ? trial.argumentOptions : [];
     if (phase === "testimony" && testimonyOptions.length) {
-      return { phase: "testimony", options: testimonyOptions.slice(0, 3) };
+      return { phase: "testimony", options: testimonyOptions.filter(Boolean).slice(0, 3) };
     }
     if (phase === "argument" && argumentOptions.length) {
-      return { phase: "argument", options: argumentOptions.slice(0, 3) };
+      return { phase: "argument", options: argumentOptions.filter(Boolean).slice(0, 3) };
     }
     return { phase: "", options: [] };
   }
 
-  function chooseTrialOption(index) {
+  function localCanChooseTrial(trial = game.trial) {
+    const choice = visibleTrialChoice(trial);
+    if (!choice.phase || !choice.options.length) return false;
+    if (!game.online.active || !game.online.authoritative) return true;
+    const slot = Number(game.online.slot || 0);
+    return choice.phase === "testimony"
+      ? slot === Number(trial.targetSlot || 0)
+      : slot === Number(trial.casterSlot || 0);
+  }
+
+  function syncTrialUiState() {
     const trial = game.trial;
-    if (!trial || game.online.active && game.online.authoritative) {
-      if (game.online.active && game.online.authoritative && game.trial) queueOnlineEdge("trialChoice", index);
+    if (!trial) {
+      game.trialHover = -1;
+      game.trialDebugPhase = "";
+      game.trialOptionWarning = "";
       return;
     }
-    if (trial.phase === "testimony") {
-      const option = trial.options[clamp(index, 0, 2)] || trial.options[0];
+    const choice = visibleTrialChoice(trial);
+    const phaseKey = `${trial.phase}:${Math.ceil(Number(trial.timer || 0) * 10)}:${(trial.options || []).length}:${(trial.argumentOptions || []).length}`;
+    if (game.trialDebugPhase !== phaseKey) {
+      // console.log("[TRIAL]", trial.phase, trial.timer, (trial.options || []).length, (trial.argumentOptions || []).length);
+      game.trialDebugPhase = phaseKey;
+    }
+    if (!choice.options.length) game.trialHover = -1;
+    if (selectableTrialPhase(trial) && !choice.options.length) {
+      const warnKey = `${trial.phase}:missing`;
+      if (game.trialOptionWarning !== warnKey) {
+        console.warn("[TRIAL] missing selectable options", trial.phase);
+        game.trialOptionWarning = warnKey;
+      }
+    } else {
+      game.trialOptionWarning = "";
+    }
+    if (trial.localChoicePendingPhase && trial.localChoicePendingPhase !== trial.phase) {
+      trial.localChoicePendingPhase = "";
+    }
+  }
+
+  function clearTrialState() {
+    game.trial = null;
+    game.trialHover = -1;
+    game.trialDebugPhase = "";
+    game.trialOptionWarning = "";
+    game.domainIntro = 0;
+    game.domainStartup = 0;
+    game.domainOwnerSlot = 0;
+    game.cinematic = 0;
+    game.windPaused = false;
+    for (const fighter of [game.player, game.enemy]) {
+      if (!fighter) continue;
+      if (fighter.state === "judged" || fighter.state === "domainPose" || fighter.state === "voidFrozen") fighter.state = "idle";
+      fighter.charging = false;
+      fighter.blocking = false;
+    }
+  }
+
+  function chooseTrialOption(index) {
+    const trial = game.trial;
+    const choice = visibleTrialChoice(trial);
+    if (!trial || !choice.options.length || !localCanChooseTrial(trial)) return;
+    const safeIndex = clamp(Math.round(Number(index) || 0), 0, choice.options.length - 1);
+    if (game.online.active && game.online.authoritative) {
+      if (trial.localChoicePendingPhase === choice.phase) return;
+      trial.localChoicePendingPhase = choice.phase;
+      queueOnlineEdge("trialChoice", safeIndex);
+      game.trialHover = -1;
+      return;
+    }
+    if (choice.phase === "testimony") {
+      const option = choice.options[safeIndex];
       trial.chosenDialogue = option;
-      trial.message = `${trialCharacterLine(trial.targetCharacter, "testimony")} "${option.text}"`;
+      trial.message = `${trialCharacterLine(trial.targetCharacter, "testimony")} "${option?.text || "I will say nothing."}"`;
       trial.argumentOptions = randomTrialOptions(trialArgumentPool, 3);
       trial.phase = "argument";
+      trial.localChoicePendingPhase = "";
+      game.trialHover = -1;
       trial.timer = 8;
       trial.maxTimer = 8;
       tone(180, .12, "square", .15, 120);
-    } else if (trial.phase === "argument") {
-      const option = trial.argumentOptions[clamp(index, 0, 2)] || trial.argumentOptions[0];
+    } else if (choice.phase === "argument") {
+      const option = choice.options[safeIndex];
+      game.trialHover = -1;
       resolveOfflineTrial(option);
     }
   }
@@ -2021,12 +2101,20 @@
     game.trial.timer = .8;
     game.trial.maxTimer = .8;
     game.trial.message = "READY?";
+    game.trial.options = [];
+    game.trial.argumentOptions = [];
+    game.trial.localChoicePendingPhase = "";
+    game.trialHover = -1;
     game.flash = .12;
   }
 
   function updateTrial(dt) {
     const trial = game.trial;
     if (!trial) return false;
+    ui.pause.classList.add("hidden");
+    ui.characterSelect.classList.add("hidden");
+    ui.menu.classList.add("hidden");
+    syncTrialUiState();
     if (game.player && game.enemy) {
       const focus = trial.phase === "startup" || trial.phase === "argument"
         ? game.player.x
@@ -2058,16 +2146,7 @@
     if (game.online.active && game.online.authoritative) {
       trial.timer = Math.max(0, trial.timer - dt);
       if (trial.phase === "resume" && trial.timer <= 0) {
-        game.trial = null;
-        game.domainIntro = 0;
-        game.domainStartup = 0;
-        game.cinematic = 0;
-        game.windPaused = false;
-        game.domainOwnerSlot = 0;
-        game.trialHover = -1;
-        for (const fighter of [game.player, game.enemy]) {
-          if (fighter && fighter.state === "judged") fighter.state = "idle";
-        }
+        clearTrialState();
         announce("FIGHT");
       } else if (trial.phase === "resume" && trial.timer <= .45) {
         trial.message = "FIGHT";
@@ -2105,9 +2184,7 @@
     } else if (trial.phase === "resume") {
       if (trial.timer <= .45) trial.message = "FIGHT";
       if (trial.timer <= 0) {
-        game.trial = null;
-        game.windPaused = false;
-        game.domainOwnerSlot = 0;
+        clearTrialState();
         announce("FIGHT");
       }
     }
@@ -5993,24 +6070,25 @@
       ctx.font = '9px "Press Start 2P", monospace';
       ctx.fillText(choice.phase === "argument" ? "HIGURUMA: CHOOSE ARGUMENT  /  CLICK OR PRESS 1-3" : "ACCUSED: CHOOSE TESTIMONY  /  CLICK OR PRESS 1-3", W / 2, H - 154);
       options.forEach((option, index) => {
-        const x = 116 + index * 350;
-        const y = H - 138;
+        const card = trialCardRect(index);
+        const x = card.x;
+        const y = card.y;
         const hover = game.trialHover === index;
         ctx.fillStyle = hover ? "#23180eee" : "#0b0a0dcc";
-        ctx.fillRect(x, y, 315, 96);
+        ctx.fillRect(x, y, card.w, card.h);
         ctx.strokeStyle = hover ? "#fff0a8" : "#f2cf74";
         ctx.lineWidth = hover ? 5 : 3;
-        ctx.strokeRect(x, y, 315, 96);
-        drawTrialIcon(option.icon, x + 33, y + 32, hover ? "#fff0a8" : "#f2cf74");
+        ctx.strokeRect(x, y, card.w, card.h);
+        drawTrialIcon(option?.icon || "paper", x + 33, y + 32, hover ? "#fff0a8" : "#f2cf74");
         ctx.fillStyle = "#f2cf74";
         ctx.font = '9px "Press Start 2P", monospace';
         ctx.textAlign = "left";
-        ctx.fillText(`${index + 1} / ${option.risk || "CHOICE"}`, x + 62, y + 28);
+        ctx.fillText(`${index + 1} / ${option?.risk || "CHOICE"}`, x + 62, y + 28);
         ctx.fillStyle = "#fff7dc";
         ctx.font = '8px "Press Start 2P", monospace';
-        wrappedLines(option.text.toUpperCase(), 31).slice(0, 2).forEach((line, row) => ctx.fillText(line, x + 62, y + 50 + row * 15));
+        wrappedLines(String(option?.text || "No statement.").toUpperCase(), 31).slice(0, 2).forEach((line, row) => ctx.fillText(line, x + 62, y + 50 + row * 15));
         ctx.fillStyle = "#c9b78d";
-        wrappedLines(option.hint || "", 33).slice(0, 2).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 78 + row * 13));
+        wrappedLines(String(option?.hint || ""), 33).slice(0, 2).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 78 + row * 13));
       });
       const timerRatio = clamp(Number(trial.timer || 0) / Math.max(.1, Number(trial.maxTimer || 8)), 0, 1);
       ctx.fillStyle = "#3b2811";
@@ -6379,11 +6457,7 @@
       game.windPaused = true;
       announce("DOMAIN EXPANSION: DEADLY SENTENCING");
     } else if (event.kind === "domainTrialFailed") {
-      game.trial = null;
-      game.domainStartup = 0;
-      game.domainIntro = 0;
-      game.cinematic = 0;
-      game.windPaused = false;
+      clearTrialState();
       announce(event.slot === game.online.slot ? "DOMAIN BROKEN" : "OPPONENT DOMAIN BROKEN");
     } else if (event.kind === "trialCharge") {
       game.trial = {
@@ -6404,11 +6478,11 @@
         chosenArgument: null,
         dialogue: null,
         argument: null,
-        choicePhase: "",
-        choiceOptions: [],
+        localChoicePendingPhase: "",
         prosecutorBonus: 0,
         defenseBonus: 0,
       };
+      game.trialHover = -1;
       game.domainIntro = 0;
       game.cinematic = 0;
       game.windPaused = true;
@@ -6419,8 +6493,8 @@
         game.trial.chosenDialogue = event.choice || null;
         game.trial.dialogue = event.choice || null;
         game.trial.argumentOptions = Array.isArray(event.argumentOptions) ? event.argumentOptions : [];
-        game.trial.choicePhase = game.trial.argumentOptions.length ? "argument" : "";
-        game.trial.choiceOptions = game.trial.argumentOptions;
+        game.trial.localChoicePendingPhase = "";
+        game.trialHover = -1;
         game.trial.timer = Number(event.timerTicks || 480) / 60;
         game.trial.maxTimer = game.trial.timer;
         game.trial.message = `ACCUSED: "${event.choice?.text || "I will say nothing."}"`;
@@ -6430,8 +6504,8 @@
       if (game.trial) {
         game.trial.chosenArgument = event.choice || null;
         game.trial.argument = event.choice || null;
-        game.trial.choicePhase = "";
-        game.trial.choiceOptions = [];
+        game.trial.localChoicePendingPhase = "";
+        game.trialHover = -1;
         game.trial.message = event.choice?.text || "ARGUMENT ENTERED";
       }
     } else if (event.kind === "trialVerdictClash") {
@@ -6443,8 +6517,8 @@
         game.trial.defense = Number(event.defense || 0);
         game.trial.prosecutorBonus = 0;
         game.trial.defenseBonus = 0;
-        game.trial.choicePhase = "";
-        game.trial.choiceOptions = [];
+        game.trial.localChoicePendingPhase = "";
+        game.trialHover = -1;
         game.trial.timer = Number(event.timerTicks || 180) / 60;
         game.trial.maxTimer = game.trial.timer;
         game.trial.message = "THE SCALE WILL DECIDE";
@@ -6459,8 +6533,8 @@
         game.trial.defense = Number(event.defense || game.trial.defense || 0);
         game.trial.prosecutorBonus = Number(event.prosecutorBonus || game.trial.prosecutorBonus || 0);
         game.trial.defenseBonus = Number(event.defenseBonus || game.trial.defenseBonus || 0);
-        game.trial.choicePhase = "";
-        game.trial.choiceOptions = [];
+        game.trial.localChoicePendingPhase = "";
+        game.trialHover = -1;
         game.trial.timer = 2;
         game.trial.maxTimer = 2;
         game.trial.message = trialVerdictLabel(game.trial.verdict);
@@ -6505,25 +6579,7 @@
       caster.executionSwordUsed = false;
       announce(event.slot === game.online.slot ? "SWORD EXPIRED" : "OPPONENT SWORD EXPIRED");
     } else if (event.kind === "trialPunishmentEnd") {
-      game.trial = {
-        ...(game.trial || {}),
-        phase: "resume",
-        online: true,
-        casterSlot: Number(event.casterSlot || game.trial?.casterSlot || 0),
-        targetSlot: Number(event.targetSlot || game.trial?.targetSlot || 0),
-        punishment: event.punishment || game.trial?.punishment || "none",
-        timer: .8,
-        maxTimer: .8,
-        message: "READY?",
-        options: [],
-        argumentOptions: [],
-        choicePhase: "",
-        choiceOptions: [],
-      };
-      game.domainIntro = 0;
-      game.domainStartup = 0;
-      game.cinematic = 0;
-      game.windPaused = true;
+      clearTrialState();
     } else if (event.kind === "domainActive") {
       game.domainCharacter = event.character || game.domainCharacter;
       game.domainOwnerSlot = Number(event.slot || game.domainOwnerSlot);
@@ -6649,13 +6705,15 @@
       const chosenDialogue = trial.chosenDialogue || trial.dialogue || null;
       const chosenArgument = trial.chosenArgument || trial.argument || null;
       const line = trial.line || "";
-      const options = Array.isArray(trial.options) ? trial.options : [];
-      const argumentOptions = Array.isArray(trial.argumentOptions) ? trial.argumentOptions : [];
-      const choicePhase = trial.phase === "testimony" && options.length
-        ? "testimony"
-        : trial.phase === "argument" && argumentOptions.length
-          ? "argument"
-          : "";
+      const existing = game.trial && game.trial.online ? game.trial : null;
+      const snapshotOptions = Array.isArray(trial.options) ? trial.options.filter(Boolean) : [];
+      const snapshotArgumentOptions = Array.isArray(trial.argumentOptions) ? trial.argumentOptions.filter(Boolean) : [];
+      const options = snapshotOptions.length || !existing || existing.phase !== trial.phase
+        ? snapshotOptions
+        : Array.isArray(existing.options) ? existing.options : [];
+      const argumentOptions = snapshotArgumentOptions.length || !existing || existing.phase !== trial.phase
+        ? snapshotArgumentOptions
+        : Array.isArray(existing.argumentOptions) ? existing.argumentOptions : [];
       return {
         ...trial,
         online: true,
@@ -6665,8 +6723,7 @@
         argument: chosenArgument,
         chosenDialogue,
         chosenArgument,
-        choicePhase,
-        choiceOptions: choicePhase === "testimony" ? options : choicePhase === "argument" ? argumentOptions : [],
+        localChoicePendingPhase: existing?.localChoicePendingPhase || "",
         line,
         timer: Number(trial.timer || 0) / 60,
         maxTimer: Number(trial.maxTimer || trial.timer || 1) / 60,
@@ -6865,15 +6922,12 @@
     } else if (snapshotTrial && game.trial) {
       Object.assign(game.trial, snapshotTrial);
       game.windPaused = true;
-    } else if (!snapshotTrial && game.trial?.online && game.trial.phase !== "resume") {
-      game.trial = null;
-      game.windPaused = false;
-      game.domainIntro = 0;
-      game.domainStartup = 0;
-      game.cinematic = 0;
-      game.trialHover = -1;
+    } else if (!snapshotTrial && game.trial?.online) {
+      clearTrialState();
     }
+    syncTrialUiState();
     for (const event of snapshot.events || []) displayAuthoritativeEvent(event);
+    syncTrialUiState();
   }
 
   function updateNetworkStatus(status = {}) {
@@ -7208,14 +7262,11 @@
     if (game.trial) {
       const choice = visibleTrialChoice(game.trial);
       if (choice.options.length) {
-        const rect = canvas.getBoundingClientRect();
-        const x = (event.clientX - rect.left) * (W / rect.width);
-        const y = (event.clientY - rect.top) * (H / rect.height);
+        const point = canvasPointFromMouse(event);
         let clicked = game.trialHover;
-        for (let index = 0; index < 3; index++) {
-          const cardX = 116 + index * 350;
-          const cardY = H - 138;
-          if (x >= cardX && x <= cardX + 315 && y >= cardY && y <= cardY + 96) {
+        for (let index = 0; index < choice.options.length; index++) {
+          const card = trialCardRect(index);
+          if (point.x >= card.x && point.x <= card.x + card.w && point.y >= card.y && point.y <= card.y + card.h) {
             clicked = index;
             break;
           }
@@ -7241,16 +7292,13 @@
       game.trialHover = -1;
       return;
     }
-    const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * (W / rect.width);
-    const y = (event.clientY - rect.top) * (H / rect.height);
+    const point = canvasPointFromMouse(event);
     game.trialHover = -1;
     const choice = visibleTrialChoice(game.trial);
     if (!choice.options.length) return;
     for (let index = 0; index < choice.options.length; index++) {
-      const cardX = 116 + index * 350;
-      const cardY = H - 138;
-      if (x >= cardX && x <= cardX + 315 && y >= cardY && y <= cardY + 96) {
+      const card = trialCardRect(index);
+      if (point.x >= card.x && point.x <= card.x + card.w && point.y >= card.y && point.y <= card.y + card.h) {
         game.trialHover = index;
         break;
       }
