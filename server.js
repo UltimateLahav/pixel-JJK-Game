@@ -45,6 +45,7 @@ function roomView(room) {
     hostSlot: room.players.get(room.hostToken)?.slot || 1,
     map: room.map,
     settings: room.settings,
+    chat: room.chat,
     players: [...room.players.values()]
       .sort((a, b) => a.slot - b.slot)
       .map((p) => ({
@@ -150,7 +151,7 @@ function createRoom(client, msg) {
     players: new Map([[playerToken, player]]),
     chat: [],
     loaded: new Set(),
-    votes: new Set(),
+    votes: new Map(),
     result: null,
     match: null,
     createdAt: Date.now(),
@@ -319,22 +320,23 @@ function handleRoomMessage(client, msg) {
     player.stats = msg.stats || null;
     broadcast(room, { type: "opponentStats", slot: player.slot, stats: player.stats }, player.token);
   } else if ((msg.type === "rematch" || msg.type === "returnLobby") && room.state === "ended") {
-    room.votes.add(player.token);
+    room.votes.set(player.token, msg.type);
     broadcast(room, { type: "vote", action: msg.type, slot: player.slot });
     if (room.votes.size === room.players.size) {
+      const rematch = [...room.players.keys()].every((playerToken) => room.votes.get(playerToken) === "rematch");
       room.state = "lobby";
       room.result = null;
       room.match = null;
       room.votes.clear();
       room.loaded.clear();
       for (const p of room.players.values()) {
-        p.ready = msg.type === "rematch";
+        p.ready = rematch;
         p.stats = null;
         p.character = null;
         p.variant = "normal";
         p.locked = false;
       }
-      broadcast(room, { type: "backToLobby", rematch: msg.type === "rematch" });
+      broadcast(room, { type: "backToLobby", rematch });
       syncRoom(room);
     }
   } else if (msg.type === "leave") {
