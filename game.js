@@ -1888,7 +1888,7 @@
   }
 
   function trialCardRect(index) {
-    return { x: 116 + index * 350, y: H - 138, w: 315, h: 96 };
+    return { x: 116 + index * 350, y: H - 172, w: 315, h: 82 };
   }
 
   function canvasPointFromMouse(event) {
@@ -5860,6 +5860,95 @@
     ctx.restore();
   }
 
+  function trialJudgemanSpeech(trial) {
+    if (!trial) return "COURT IS NOW IN SESSION.";
+    const crime = String(trial.crime || "THE CHARGE").replace(/\.$/, "");
+    const verdict = trialVerdictLabel(trial.verdict || "");
+    if (trial.phase === "startup") return "DOMAIN EXPANSION: DEADLY SENTENCING.";
+    if (trial.phase === "charge") return `THE ACCUSED IS SUSPECTED OF: ${crime}.`;
+    if (trial.phase === "testimony") return `DEFEND YOURSELF. CHARGE: ${crime}.`;
+    if (trial.phase === "argument") return "PROSECUTION, PRESENT YOUR ARGUMENT.";
+    if (trial.phase === "verdictClash") return "THE SCALE WILL DECIDE THE SENTENCE.";
+    if (verdict.includes("CONFISCATION")) return "CONFISCATION.";
+    if (verdict.includes("DEATH")) return "DEATH PENALTY.";
+    if (verdict.includes("FINE")) return "GUILTY. PAY THE FINE.";
+    if (verdict.includes("NOT GUILTY")) return "NOT GUILTY.";
+    if (verdict.includes("MISTRIAL")) return "MISTRIAL.";
+    return "THE VERDICT HAS BEEN HANDED DOWN.";
+  }
+
+  function drawJudgemanCreature(x, y, t, death = false) {
+    ctx.save();
+    ctx.translate(x, y + Math.sin(t * 2.2) * 4);
+    ctx.globalAlpha = .92;
+    ctx.fillStyle = death ? "#1f0504" : "#08070b";
+    ctx.strokeStyle = death ? "#ffb23d" : "#f2cf74";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(0, -78, 96, 110, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = death ? "#ffb23d" : "#f2cf74";
+    ctx.fillRect(-72, -34, 144, 16);
+    ctx.fillRect(-46, 0, 92, 14);
+    ctx.fillRect(-24, 28, 48, 10);
+    ctx.fillStyle = "#fff7dc";
+    for (let i = 0; i < 5; i++) {
+      const ex = -54 + i * 27;
+      const ey = -92 + Math.sin(t * 3 + i) * 4;
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, 12, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = death ? "#ff372d" : "#121013";
+      ctx.fillRect(ex - 3, ey - 3, 6, 6);
+      ctx.fillStyle = "#fff7dc";
+    }
+    ctx.strokeStyle = death ? "#ff5a35" : "#fff0a8";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 9; i++) {
+      const a = -Math.PI * .82 + i * Math.PI * .205;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 76, -76 + Math.sin(a) * 90);
+      ctx.lineTo(Math.cos(a) * 116, -80 + Math.sin(a) * 126);
+      ctx.stroke();
+    }
+    ctx.fillStyle = death ? "#ffb23d" : "#f2cf74";
+    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.textAlign = "center";
+    ctx.fillText("JUDGEMAN", 0, 58);
+    ctx.restore();
+  }
+
+  function drawJudgemanSpeechBox(trial, t, death = false) {
+    const text = trialJudgemanSpeech(trial);
+    const lines = wrappedLines(text.toUpperCase(), trial.phase === "charge" || trial.phase === "testimony" ? 50 : 38).slice(0, 3);
+    const x = 360;
+    const y = 142;
+    const w = 560;
+    const h = 76;
+    ctx.save();
+    ctx.fillStyle = death ? "#220604ef" : "#07060cef";
+    ctx.strokeStyle = death ? "#ffb23d" : "#f2cf74";
+    ctx.lineWidth = 4;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+    ctx.beginPath();
+    ctx.moveTo(x + 52, y + h);
+    ctx.lineTo(x - 30, y + h + 34);
+    ctx.lineTo(x + 86, y + h - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = death ? "#ffcf72" : "#f2cf74";
+    ctx.font = '8px "Press Start 2P", monospace';
+    ctx.textAlign = "left";
+    ctx.fillText("JUDGEMAN SAYS", x + 18, y + 21);
+    ctx.fillStyle = "#fff7dc";
+    ctx.font = '9px "Press Start 2P", monospace';
+    lines.forEach((line, index) => ctx.fillText(line, x + 18, y + 43 + index * 16));
+    ctx.restore();
+  }
+
   function drawTrialCourtroom() {
     const trial = game.trial;
     if (!trial) return;
@@ -5948,6 +6037,8 @@
     ctx.strokeStyle = "#f2cf74";
     ctx.lineWidth = trial.phase === "verdict" ? 7 : 4;
     ctx.strokeRect(W / 2 - 210, 204, 420, 104);
+    drawJudgemanCreature(286, 308, t, death);
+
     ctx.fillStyle = death ? "#2b0a07" : "#18131b";
     ctx.fillRect(W / 2 - 105, judgeY - 38, 210, 92);
     ctx.fillStyle = death ? "#ffb23d" : "#f2cf74";
@@ -5971,6 +6062,8 @@
       ctx.fillRect(-13, -38, 26, 60);
       ctx.restore();
     }
+
+    drawJudgemanSpeechBox(trial, t, death);
 
     drawTrialCourtFigure("PROSECUTOR", 286, 378, "higuruma", true);
     drawTrialCourtFigure("DEFENDANT", W - 286, 378, trial.targetCharacter || game.enemy?.character || "sukuna", false);
@@ -6013,16 +6106,16 @@
 
     ctx.textAlign = "left";
     ctx.fillStyle = "#0c0b0fdd";
-    ctx.fillRect(92, 458, W - 184, 94);
+    ctx.fillRect(92, 418, W - 184, 86);
     ctx.strokeStyle = "#f2cf74";
     ctx.lineWidth = 3;
-    ctx.strokeRect(92, 458, W - 184, 94);
+    ctx.strokeRect(92, 418, W - 184, 86);
     ctx.fillStyle = "#f2cf74";
     ctx.font = '9px "Press Start 2P", monospace';
-    ctx.fillText(`ACCUSED: ${(characters[trial.targetCharacter]?.name || trial.targetCharacter || "UNKNOWN").toUpperCase()}`, 116, 485);
+    ctx.fillText(`ACCUSED: ${(characters[trial.targetCharacter]?.name || trial.targetCharacter || "UNKNOWN").toUpperCase()}`, 116, 445);
     ctx.fillStyle = "#fff7dc";
     ctx.font = '9px "Press Start 2P", monospace';
-    wrappedLines(trial.crime || "Preparing evidence...", 88).slice(0, 2).forEach((line, index) => ctx.fillText(line.toUpperCase(), 116, 514 + index * 21));
+    wrappedLines(trial.crime || "Preparing evidence...", 88).slice(0, 2).forEach((line, index) => ctx.fillText(line.toUpperCase(), 116, 474 + index * 18));
 
     if (trial.phase === "verdictClash") {
       const ratio = clamp(.5 + (leftScore - rightScore) / 120, .12, .88);
@@ -6068,7 +6161,7 @@
       ctx.textAlign = "center";
       ctx.fillStyle = "#fff0a8";
       ctx.font = '9px "Press Start 2P", monospace';
-      ctx.fillText(choice.phase === "argument" ? "HIGURUMA: CHOOSE ARGUMENT  /  CLICK OR PRESS 1-3" : "ACCUSED: CHOOSE TESTIMONY  /  CLICK OR PRESS 1-3", W / 2, H - 154);
+      ctx.fillText(choice.phase === "argument" ? "HIGURUMA: ARGUMENT BUTTONS  /  CLICK OR PRESS 1-3" : "ACCUSED: DEFENSE BUTTONS  /  CLICK OR PRESS 1-3", W / 2, H - 188);
       options.forEach((option, index) => {
         const card = trialCardRect(index);
         const x = card.x;
@@ -6083,12 +6176,12 @@
         ctx.fillStyle = "#f2cf74";
         ctx.font = '9px "Press Start 2P", monospace';
         ctx.textAlign = "left";
-        ctx.fillText(`${index + 1} / ${option?.risk || "CHOICE"}`, x + 62, y + 28);
+        ctx.fillText(`${index + 1} / ${option?.risk || "CHOICE"}`, x + 62, y + 24);
         ctx.fillStyle = "#fff7dc";
         ctx.font = '8px "Press Start 2P", monospace';
-        wrappedLines(String(option?.text || "No statement.").toUpperCase(), 31).slice(0, 2).forEach((line, row) => ctx.fillText(line, x + 62, y + 50 + row * 15));
+        wrappedLines(String(option?.text || "No statement.").toUpperCase(), 31).slice(0, 2).forEach((line, row) => ctx.fillText(line, x + 62, y + 43 + row * 13));
         ctx.fillStyle = "#c9b78d";
-        wrappedLines(String(option?.hint || ""), 33).slice(0, 2).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 78 + row * 13));
+        wrappedLines(String(option?.hint || ""), 36).slice(0, 1).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 70 + row * 11));
       });
       const timerRatio = clamp(Number(trial.timer || 0) / Math.max(.1, Number(trial.maxTimer || 8)), 0, 1);
       ctx.fillStyle = "#3b2811";
