@@ -50,6 +50,7 @@
     tickMs: 1000 / 60,
     lastInputFrame: -1,
     reconnectDeadline: 0,
+    chatSignature: "",
   };
 
   const socketUrl = location.protocol === "file:"
@@ -241,7 +242,7 @@
       state.matchActive = false;
       const remoteSlot = state.slot === 1 ? 2 : 1;
       const opponentStats = message.stats?.[remoteSlot] || message.stats || null;
-      window.VoidLimitOnline?.finish?.(message.winnerSlot === state.slot, opponentStats);
+      window.VoidLimitOnline?.finish?.(message.winnerSlot === state.slot, opponentStats, Number(message.winnerSlot || 0) === 0);
       send({ type: "stats", stats: window.VoidLimitOnline?.stats?.() || {} });
     } else if (message.type === "opponentStats") {
       window.VoidLimitOnline?.opponentStats?.(message.stats);
@@ -339,6 +340,16 @@
       state.room.players.every((player) => player.ready && player.connected);
     ui.start.classList.toggle("hidden", !host);
     ui.start.disabled = !host || !everybodyReady || state.room.state !== "lobby";
+    renderChatHistory(state.room.chat);
+  }
+
+  function renderChatHistory(entries = []) {
+    if (!Array.isArray(entries)) return;
+    const signature = entries.map((entry) => `${entry.at}:${entry.slot}:${entry.text}`).join("|");
+    if (signature === state.chatSignature) return;
+    state.chatSignature = signature;
+    ui.chatLog.textContent = "";
+    for (const entry of entries) appendChat(entry);
   }
 
   function appendChat(entry) {
@@ -561,5 +572,4 @@
 
   const saved = loadSession();
   if (saved?.name) ui.name.value = saved.name;
-  connect();
 })();
