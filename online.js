@@ -284,6 +284,7 @@
           remoteVariant: state.room.players.find((p) => p.slot !== state.slot)?.variant || "normal",
         });
         ui.panel.classList.add("hidden");
+        ui.intro.classList.add("hidden");
       }
       if (message.snapshot) window.VoidLimitOnline?.authoritative?.(message.snapshot);
     } else if (message.type === "connection") {
@@ -366,6 +367,7 @@
   }
 
   function prepareMatch() {
+    ui.panel.classList.add("hidden");
     ui.intro.classList.remove("hidden");
     ui.loading.textContent = "LOADING BATTLE MAP";
     ui.countdown.textContent = "...";
