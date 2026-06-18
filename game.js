@@ -1889,6 +1889,20 @@
     return Math.max(0, ids.indexOf(found));
   }
 
+  function visibleTrialChoice(trial = game.trial) {
+    if (!trial) return { phase: "", options: [] };
+    const phase = trial.choicePhase || trial.phase;
+    const testimonyOptions = Array.isArray(trial.options) ? trial.options : [];
+    const argumentOptions = Array.isArray(trial.argumentOptions) ? trial.argumentOptions : [];
+    if (phase === "testimony" && testimonyOptions.length) {
+      return { phase: "testimony", options: testimonyOptions.slice(0, 3) };
+    }
+    if (phase === "argument" && argumentOptions.length) {
+      return { phase: "argument", options: argumentOptions.slice(0, 3) };
+    }
+    return { phase: "", options: [] };
+  }
+
   function chooseTrialOption(index) {
     const trial = game.trial;
     if (!trial || game.online.active && game.online.authoritative) {
@@ -5971,8 +5985,13 @@
       ctx.fillText(`TIP THE SCALE  ${Math.ceil(trial.timer || 0)}`, W / 2, 379);
     }
 
-    const options = trial.phase === "testimony" ? trial.options : trial.phase === "argument" ? trial.argumentOptions : [];
+    const choice = visibleTrialChoice(trial);
+    const options = choice.options;
     if (options.length) {
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff0a8";
+      ctx.font = '9px "Press Start 2P", monospace';
+      ctx.fillText(choice.phase === "argument" ? "HIGURUMA: CHOOSE ARGUMENT  /  CLICK OR PRESS 1-3" : "ACCUSED: CHOOSE TESTIMONY  /  CLICK OR PRESS 1-3", W / 2, H - 154);
       options.forEach((option, index) => {
         const x = 116 + index * 350;
         const y = H - 138;
@@ -6385,6 +6404,8 @@
         chosenArgument: null,
         dialogue: null,
         argument: null,
+        choicePhase: "",
+        choiceOptions: [],
         prosecutorBonus: 0,
         defenseBonus: 0,
       };
@@ -6398,6 +6419,8 @@
         game.trial.chosenDialogue = event.choice || null;
         game.trial.dialogue = event.choice || null;
         game.trial.argumentOptions = Array.isArray(event.argumentOptions) ? event.argumentOptions : [];
+        game.trial.choicePhase = game.trial.argumentOptions.length ? "argument" : "";
+        game.trial.choiceOptions = game.trial.argumentOptions;
         game.trial.timer = Number(event.timerTicks || 480) / 60;
         game.trial.maxTimer = game.trial.timer;
         game.trial.message = `ACCUSED: "${event.choice?.text || "I will say nothing."}"`;
@@ -6407,6 +6430,8 @@
       if (game.trial) {
         game.trial.chosenArgument = event.choice || null;
         game.trial.argument = event.choice || null;
+        game.trial.choicePhase = "";
+        game.trial.choiceOptions = [];
         game.trial.message = event.choice?.text || "ARGUMENT ENTERED";
       }
     } else if (event.kind === "trialVerdictClash") {
@@ -6418,6 +6443,8 @@
         game.trial.defense = Number(event.defense || 0);
         game.trial.prosecutorBonus = 0;
         game.trial.defenseBonus = 0;
+        game.trial.choicePhase = "";
+        game.trial.choiceOptions = [];
         game.trial.timer = Number(event.timerTicks || 180) / 60;
         game.trial.maxTimer = game.trial.timer;
         game.trial.message = "THE SCALE WILL DECIDE";
@@ -6432,6 +6459,8 @@
         game.trial.defense = Number(event.defense || game.trial.defense || 0);
         game.trial.prosecutorBonus = Number(event.prosecutorBonus || game.trial.prosecutorBonus || 0);
         game.trial.defenseBonus = Number(event.defenseBonus || game.trial.defenseBonus || 0);
+        game.trial.choicePhase = "";
+        game.trial.choiceOptions = [];
         game.trial.timer = 2;
         game.trial.maxTimer = 2;
         game.trial.message = trialVerdictLabel(game.trial.verdict);
@@ -6488,6 +6517,8 @@
         message: "READY?",
         options: [],
         argumentOptions: [],
+        choicePhase: "",
+        choiceOptions: [],
       };
       game.domainIntro = 0;
       game.domainStartup = 0;
@@ -6618,15 +6649,24 @@
       const chosenDialogue = trial.chosenDialogue || trial.dialogue || null;
       const chosenArgument = trial.chosenArgument || trial.argument || null;
       const line = trial.line || "";
+      const options = Array.isArray(trial.options) ? trial.options : [];
+      const argumentOptions = Array.isArray(trial.argumentOptions) ? trial.argumentOptions : [];
+      const choicePhase = trial.phase === "testimony" && options.length
+        ? "testimony"
+        : trial.phase === "argument" && argumentOptions.length
+          ? "argument"
+          : "";
       return {
         ...trial,
         online: true,
-        options: Array.isArray(trial.options) ? trial.options : [],
-        argumentOptions: Array.isArray(trial.argumentOptions) ? trial.argumentOptions : [],
+        options,
+        argumentOptions,
         dialogue: chosenDialogue,
         argument: chosenArgument,
         chosenDialogue,
         chosenArgument,
+        choicePhase,
+        choiceOptions: choicePhase === "testimony" ? options : choicePhase === "argument" ? argumentOptions : [],
         line,
         timer: Number(trial.timer || 0) / 60,
         maxTimer: Number(trial.maxTimer || trial.timer || 1) / 60,
@@ -7166,8 +7206,8 @@
     if (game.state !== "playing" || game.clash) return;
     event.preventDefault();
     if (game.trial) {
-      const trial = game.trial;
-      if (trial.phase === "testimony" || trial.phase === "argument") {
+      const choice = visibleTrialChoice(game.trial);
+      if (choice.options.length) {
         const rect = canvas.getBoundingClientRect();
         const x = (event.clientX - rect.left) * (W / rect.width);
         const y = (event.clientY - rect.top) * (H / rect.height);
@@ -7205,8 +7245,9 @@
     const x = (event.clientX - rect.left) * (W / rect.width);
     const y = (event.clientY - rect.top) * (H / rect.height);
     game.trialHover = -1;
-    if (game.trial.phase !== "testimony" && game.trial.phase !== "argument") return;
-    for (let index = 0; index < 3; index++) {
+    const choice = visibleTrialChoice(game.trial);
+    if (!choice.options.length) return;
+    for (let index = 0; index < choice.options.length; index++) {
       const cardX = 116 + index * 350;
       const cardY = H - 138;
       if (x >= cardX && x <= cardX + 315 && y >= cardY && y <= cardY + 96) {
