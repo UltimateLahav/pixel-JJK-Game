@@ -70,6 +70,9 @@
     introDialogue: $("#introDialogue"),
     fightCountdown: $("#fightCountdown"),
     loadingStatus: $("#loadingStatus"),
+    onlineMenu: $("#onlineMenu"),
+    onlineLobby: $("#onlineLobby"),
+    onlineHome: $("#onlineHome"),
   };
 
   const W = canvas.width;
@@ -977,6 +980,9 @@
     game.enemy.energy = Number(options.energy) || 70;
     ui.menu.classList.add("hidden");
     ui.result.classList.add("hidden");
+    ui.onlineMenu?.classList.add("hidden");
+    ui.intro?.classList.add("hidden");
+    ui.characterSelect.classList.add("hidden");
     ui.hud.classList.remove("hidden");
     announce("ONLINE BARRIER LINKED");
     updateHud();
@@ -1888,7 +1894,11 @@
   }
 
   function trialCardRect(index) {
-    return { x: 116 + index * 350, y: H - 172, w: 315, h: 82 };
+    const margin = 68;
+    const gap = 18;
+    const w = (W - margin * 2 - gap * 2) / 3;
+    const h = 112;
+    return { x: margin + index * (w + gap), y: H - h - 96, w, h };
   }
 
   function canvasPointFromMouse(event) {
@@ -1897,6 +1907,16 @@
       x: (event.clientX - rect.left) * (canvas.width / rect.width),
       y: (event.clientY - rect.top) * (canvas.height / rect.height),
     };
+  }
+
+  function trialCardIndexAt(point, trial = game.trial) {
+    const choice = visibleTrialChoice(trial);
+    if (!choice.options.length || !point) return -1;
+    for (let index = 0; index < choice.options.length; index++) {
+      const card = trialCardRect(index);
+      if (point.x >= card.x && point.x <= card.x + card.w && point.y >= card.y && point.y <= card.y + card.h) return index;
+    }
+    return -1;
   }
 
   function selectableTrialPhase(trial = game.trial) {
@@ -1927,6 +1947,19 @@
       : slot === Number(trial.casterSlot || 0);
   }
 
+  function trialChoiceStatus(trial = game.trial) {
+    const choice = visibleTrialChoice(trial);
+    if (!trial || !choice.phase || !choice.options.length) return { choice, canChoose: false, pending: false, label: "" };
+    const canChoose = localCanChooseTrial(trial);
+    const pending = game.online.active && game.online.authoritative && trial.localChoicePendingPhase === choice.phase;
+    const label = pending
+      ? "CHOICE SENT"
+      : canChoose
+        ? (choice.phase === "argument" ? "YOUR ARGUMENT - PRESS 1 / 2 / 3 OR CLICK" : "YOUR TESTIMONY - PRESS 1 / 2 / 3 OR CLICK")
+        : "WAITING FOR OPPONENT";
+    return { choice, canChoose, pending, label };
+  }
+
   function syncTrialUiState() {
     const trial = game.trial;
     if (!trial) {
@@ -1952,6 +1985,12 @@
       game.trialOptionWarning = "";
     }
     if (trial.localChoicePendingPhase && trial.localChoicePendingPhase !== trial.phase) {
+      trial.localChoicePendingPhase = "";
+    }
+    if (trial.localChoicePendingPhase === "testimony" && (trial.dialogue || trial.chosenDialogue || trial.phase !== "testimony")) {
+      trial.localChoicePendingPhase = "";
+    }
+    if (trial.localChoicePendingPhase === "argument" && (trial.argument || trial.chosenArgument || trial.phase !== "argument")) {
       trial.localChoicePendingPhase = "";
     }
   }
@@ -1983,6 +2022,7 @@
       if (trial.localChoicePendingPhase === choice.phase) return;
       trial.localChoicePendingPhase = choice.phase;
       queueOnlineEdge("trialChoice", safeIndex);
+      announce(choice.phase === "argument" ? "ARGUMENT SENT" : "TESTIMONY SENT");
       game.trialHover = -1;
       return;
     }
@@ -2114,6 +2154,11 @@
     ui.pause.classList.add("hidden");
     ui.characterSelect.classList.add("hidden");
     ui.menu.classList.add("hidden");
+    ui.onlineMenu?.classList.add("hidden");
+    ui.onlineLobby?.classList.add("hidden");
+    ui.onlineHome?.classList.add("hidden");
+    ui.intro?.classList.add("hidden");
+    ui.result.classList.add("hidden");
     syncTrialUiState();
     if (game.player && game.enemy) {
       const focus = trial.phase === "startup" || trial.phase === "argument"
@@ -6170,39 +6215,48 @@
       ctx.fillText(`TIP THE SCALE  ${Math.ceil(trial.timer || 0)}`, W / 2, 379);
     }
 
-    const choice = visibleTrialChoice(trial);
+    const status = trialChoiceStatus(trial);
+    const choice = status.choice;
     const options = choice.options;
     if (options.length) {
+      const firstCard = trialCardRect(0);
+      const timerY = firstCard.y + firstCard.h + 8;
       ctx.textAlign = "center";
-      ctx.fillStyle = "#fff0a8";
-      ctx.font = '9px "Press Start 2P", monospace';
-      ctx.fillText(choice.phase === "argument" ? "HIGURUMA: ARGUMENT BUTTONS  /  CLICK OR PRESS 1-3" : "ACCUSED: DEFENSE BUTTONS  /  CLICK OR PRESS 1-3", W / 2, H - 188);
+      ctx.fillStyle = status.canChoose && !status.pending ? "#fff0a8" : "#8da0ba";
+      ctx.font = '10px "Press Start 2P", monospace';
+      ctx.fillText(status.label, W / 2, firstCard.y - 14);
       options.forEach((option, index) => {
         const card = trialCardRect(index);
         const x = card.x;
         const y = card.y;
-        const hover = game.trialHover === index;
-        ctx.fillStyle = hover ? "#23180eee" : "#0b0a0dcc";
+        const hover = status.canChoose && !status.pending && game.trialHover === index;
+        const disabled = !status.canChoose || status.pending;
+        ctx.fillStyle = hover ? "#251b0cee" : disabled ? "#080b13c8" : "#0b0a0dcc";
         ctx.fillRect(x, y, card.w, card.h);
-        ctx.strokeStyle = hover ? "#fff0a8" : "#f2cf74";
+        ctx.strokeStyle = hover ? "#fff0a8" : disabled ? "#40506d" : "#f2cf74";
         ctx.lineWidth = hover ? 5 : 3;
         ctx.strokeRect(x, y, card.w, card.h);
-        drawTrialIcon(option?.icon || "paper", x + 33, y + 32, hover ? "#fff0a8" : "#f2cf74");
-        ctx.fillStyle = "#f2cf74";
-        ctx.font = '9px "Press Start 2P", monospace';
+        drawTrialIcon(option?.icon || "paper", x + 38, y + 48, hover ? "#fff0a8" : disabled ? "#5c6980" : "#f2cf74");
+        ctx.fillStyle = disabled ? "#6f7d96" : "#f2cf74";
+        ctx.font = '11px "Press Start 2P", monospace';
         ctx.textAlign = "left";
-        ctx.fillText(`${index + 1} / ${option?.risk || "CHOICE"}`, x + 62, y + 24);
-        ctx.fillStyle = "#fff7dc";
+        ctx.fillText(`${index + 1}`, x + 18, y + 26);
         ctx.font = '8px "Press Start 2P", monospace';
-        wrappedLines(String(option?.text || "No statement.").toUpperCase(), 31).slice(0, 2).forEach((line, row) => ctx.fillText(line, x + 62, y + 43 + row * 13));
-        ctx.fillStyle = "#c9b78d";
-        wrappedLines(String(option?.hint || ""), 36).slice(0, 1).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 70 + row * 11));
+        ctx.fillText(String(option?.risk || "CHOICE").toUpperCase(), x + 62, y + 26);
+        ctx.fillStyle = disabled ? "#9aa6bb" : "#fff7dc";
+        wrappedLines(String(option?.text || "No statement.").toUpperCase(), 36).slice(0, 3).forEach((line, row) => ctx.fillText(line, x + 62, y + 48 + row * 13));
+        ctx.fillStyle = disabled ? "#68748a" : "#c9b78d";
+        wrappedLines(String(option?.hint || ""), 44).slice(0, 2).forEach((line, row) => ctx.fillText(line.toUpperCase(), x + 16, y + 94 + row * 11));
+        if (disabled) {
+          ctx.fillStyle = "rgba(2, 5, 12, .42)";
+          ctx.fillRect(x, y, card.w, card.h);
+        }
       });
       const timerRatio = clamp(Number(trial.timer || 0) / Math.max(.1, Number(trial.maxTimer || 8)), 0, 1);
       ctx.fillStyle = "#3b2811";
-      ctx.fillRect(230, H - 22, W - 460, 8);
+      ctx.fillRect(230, timerY, W - 460, 8);
       ctx.fillStyle = "#f2cf74";
-      ctx.fillRect(230, H - 22, (W - 460) * timerRatio, 8);
+      ctx.fillRect(230, timerY, (W - 460) * timerRatio, 8);
     }
 
     if (trial.phase === "verdict" || trial.phase === "resume") {
@@ -7371,21 +7425,14 @@
     if (key === "s" && game.player) game.player.blocking = false;
   });
 
-  canvas.addEventListener("mousedown", (event) => {
+  function handleCanvasPress(event, pointOverride = null) {
     if (game.state !== "playing" || game.clash) return;
     event.preventDefault();
     if (game.trial) {
       const choice = visibleTrialChoice(game.trial);
       if (choice.options.length) {
-        const point = canvasPointFromMouse(event);
-        let clicked = game.trialHover;
-        for (let index = 0; index < choice.options.length; index++) {
-          const card = trialCardRect(index);
-          if (point.x >= card.x && point.x <= card.x + card.w && point.y >= card.y && point.y <= card.y + card.h) {
-            clicked = index;
-            break;
-          }
-        }
+        const point = pointOverride || canvasPointFromMouse(event);
+        const clicked = trialCardIndexAt(point, game.trial);
         if (clicked >= 0) chooseTrialOption(clicked);
       }
       return;
@@ -7398,7 +7445,21 @@
       queueOnlineEdge("heavy");
       playerAttack("heavy");
     }
+  }
+
+  canvas.addEventListener("pointerdown", handleCanvasPress);
+
+  canvas.addEventListener("mousedown", (event) => {
+    if (window.PointerEvent) return;
+    handleCanvasPress(event);
   });
+
+  canvas.addEventListener("touchstart", (event) => {
+    if (window.PointerEvent || !event.touches?.length) return;
+    const touch = event.touches[0];
+    const point = canvasPointFromMouse(touch);
+    handleCanvasPress(event, point);
+  }, { passive: false });
 
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
@@ -7411,13 +7472,7 @@
     game.trialHover = -1;
     const choice = visibleTrialChoice(game.trial);
     if (!choice.options.length) return;
-    for (let index = 0; index < choice.options.length; index++) {
-      const card = trialCardRect(index);
-      if (point.x >= card.x && point.x <= card.x + card.w && point.y >= card.y && point.y <= card.y + card.h) {
-        game.trialHover = index;
-        break;
-      }
-    }
+    game.trialHover = trialCardIndexAt(point, game.trial);
   });
 
   $$(".mode").forEach((button) => button.addEventListener("click", () => {
