@@ -839,8 +839,8 @@
         onlineLockRequest = null;
         ui.confirmCharacter.disabled = false;
         ui.confirmCharacter.textContent = "LOCK IN";
-        ui.selectionStatus.textContent = "SERVER DID NOT CONFIRM. RESTART start-online.bat, THEN TRY AGAIN.";
-      }, 1600);
+        ui.selectionStatus.textContent = "SERVER DID NOT CONFIRM YET. CHECK CONNECTION OR TRY LOCKING AGAIN.";
+      }, 5000);
       return;
     }
     selectionLocked = true;
@@ -4233,13 +4233,15 @@
     return false;
   }
 
-  function finishGame(won) {
+  function finishGame(won, draw = false) {
     game.state = "result";
     ui.hud.classList.add("hidden");
     ui.result.classList.remove("hidden");
-    ui.resultTitle.textContent = won ? "VICTORY" : "DEFEAT";
+    ui.resultTitle.textContent = draw ? "DRAW" : won ? "VICTORY" : "DEFEAT";
     ui.resultSub.textContent = game.mode === "online"
-      ? `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds survived | ${game.online.remoteName}`
+      ? draw
+        ? `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds fought | No winner`
+        : `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds survived | ${game.online.remoteName}`
       : won
         ? game.mode === "story" ? "The curtain falls. The strongest remains." : "Another impossible record."
         : "Power means nothing without timing.";
@@ -4286,12 +4288,12 @@
     };
   }
 
-  function finishOnlineMatch(won, opponentStats) {
+  function finishOnlineMatch(won, opponentStats, draw = false) {
     if (!game.online.active) return;
     game.online.opponentStats = opponentStats;
     game.player.health = Math.max(0, game.player.health);
     game.enemy.health = Math.max(0, game.enemy.health);
-    finishGame(won);
+    finishGame(won, draw);
   }
 
   function unlockedCostumes() {
@@ -6855,7 +6857,7 @@
         ? (event.slot === game.online.slot ? "FIVE ROLLS MISSED" : "OPPONENT'S DOMAIN SHATTERED")
         : (event.slot === game.online.slot ? `ROLL ${rollLabel} MISSED` : `OPPONENT MISSED ROLL ${rollLabel}`));
     } else if (event.kind === "clashResult") {
-      announce(event.winnerSlot === game.online.slot ? "CLASH WON" : "CLASH LOST");
+      announce(Number(event.winnerSlot || 0) === 0 ? "CLASH DRAW" : event.winnerSlot === game.online.slot ? "CLASH WON" : "CLASH LOST");
       game.flash = .18;
       game.shake = 16;
     } else if (event.kind === "hit" && event.slot === game.online.slot) {
@@ -7473,6 +7475,109 @@
     const choice = visibleTrialChoice(game.trial);
     if (!choice.options.length) return;
     game.trialHover = trialCardIndexAt(point, game.trial);
+  });
+
+  function touchActionPress(action, button) {
+    if (game.state !== "playing") return;
+    button?.classList.add("pressed");
+    if (action === "left") return keys.add("a");
+    if (action === "right") return keys.add("d");
+    if (action === "block") {
+      keys.add("s");
+      if (game.player) game.player.guardStart = performance.now();
+      return;
+    }
+    if (action === "charge") return keys.add("c");
+    if (action === "jump") {
+      queueOnlineEdge("jump");
+      jump();
+      return;
+    }
+    if (action === "dash") {
+      queueOnlineEdge("dash");
+      shortDash();
+      return;
+    }
+    if (action === "light") {
+      queueOnlineEdge("light");
+      playerAttack("light");
+      return;
+    }
+    if (action === "heavy") {
+      queueOnlineEdge("heavy");
+      playerAttack("heavy");
+      return;
+    }
+    if (action === "e") {
+      keys.add("e");
+      if (game.player?.moveConfiscation > 0) {
+        announce("CONFISCATED");
+        tone(65, .08, "square", .15, -80);
+      } else if (game.player?.character === "sukuna" && keys.has("r")) {
+        if (startFuga()) queueOnlineEdge("fuga");
+      } else if (["gojo", "sukuna", "higuruma"].includes(game.player?.character)) {
+        beginChargedTechnique("red");
+      } else {
+        queueOnlineEdge("special", "red");
+        useAbility("red");
+      }
+      return;
+    }
+    if (action === "r") {
+      keys.add("r");
+      if (game.player?.character === "sukuna" && keys.has("e")) {
+        if (startFuga()) queueOnlineEdge("fuga");
+      } else {
+        queueOnlineEdge("special", "blue");
+        useAbility("blue");
+      }
+      return;
+    }
+    if (action === "q") {
+      queueOnlineEdge("special", "purple");
+      useAbility("purple");
+      return;
+    }
+    if (action === "t") {
+      if ("domain" in characterProfile(game.player).costs) {
+        queueOnlineEdge("domain");
+        useAbility("domain");
+      }
+    }
+  }
+
+  function touchActionRelease(action, button) {
+    button?.classList.remove("pressed");
+    if (action === "left") keys.delete("a");
+    else if (action === "right") keys.delete("d");
+    else if (action === "block") {
+      keys.delete("s");
+      if (game.player) game.player.blocking = false;
+    } else if (action === "charge") keys.delete("c");
+    else if (action === "e") {
+      keys.delete("e");
+      if (["gojo", "sukuna", "higuruma"].includes(game.player?.character)) {
+        releaseChargedTechnique();
+        queueOnlineEdge("specialRelease", "red");
+      }
+    } else if (action === "r") {
+      keys.delete("r");
+    }
+  }
+
+  $$("#touchControls [data-touch]").forEach((button) => {
+    const action = button.dataset.touch;
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      button.setPointerCapture?.(event.pointerId);
+      touchActionPress(action, button);
+    });
+    button.addEventListener("pointerup", (event) => {
+      event.preventDefault();
+      touchActionRelease(action, button);
+    });
+    button.addEventListener("pointercancel", () => touchActionRelease(action, button));
+    button.addEventListener("lostpointercapture", () => touchActionRelease(action, button));
   });
 
   $$(".mode").forEach((button) => button.addEventListener("click", () => {
