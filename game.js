@@ -5670,6 +5670,7 @@
   function drawDomain() {
     if (game.clash?.domain) return;
     if (game.domain <= 0 && game.domainIntro <= 0 && !game.clash?.domain) return;
+    if (game.domainCharacter === "higuruma" && game.trial) return;
     const intro = game.domainIntro;
     const opacity = intro > 0 ? clamp((2.35 - intro) * .7, 0, .9) : .9;
     ctx.save();
@@ -5949,124 +5950,138 @@
     ctx.restore();
   }
 
-  function drawTrialCourtroom() {
+  function drawTrialCourtroom(layer = "full") {
     const trial = game.trial;
     if (!trial) return;
+    const backgroundOnly = layer === "background";
+    const uiOnly = layer === "ui";
     const t = performance.now() * .001;
     const intro = trial.phase === "startup" ? clamp(1 - trial.timer / Math.max(.1, trial.maxTimer || 2), 0, 1) : 1;
     const death = trial.punishment === "deathPenalty" && (trial.phase === "verdict" || trial.phase === "resume");
     ctx.save();
-    ctx.globalAlpha = clamp(.28 + intro * .82, .28, 1);
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, death ? "#1f0504" : "#17100a");
-    grad.addColorStop(.52, "#050407");
-    grad.addColorStop(1, death ? "#2a0a04" : "#1f1609");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+    if (!uiOnly) {
+      ctx.globalAlpha = clamp(.28 + intro * .82, .28, 1);
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, death ? "#1f0504" : "#17100a");
+      grad.addColorStop(.52, "#050407");
+      grad.addColorStop(1, death ? "#2a0a04" : "#1f1609");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
 
-    ctx.strokeStyle = death ? "#ffb23d55" : "#f2cf7448";
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 14; i++) {
-      const x = i * 96 + Math.sin(t + i) * 18;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(W / 2 + Math.sin(i) * 110, 420);
-      ctx.stroke();
-    }
-    ctx.fillStyle = "#07060add";
-    for (let row = 0; row < 3; row++) {
-      for (let x = 60; x < W; x += 155) {
-        ctx.fillRect(x, 410 + row * 42, 110, 14);
-        ctx.fillRect(x + 8, 424 + row * 42, 10, 36);
-        if ((x + row) % 2 === 0) {
-          ctx.fillStyle = "#f2cf7425";
-          ctx.fillRect(x + 46, 386 + row * 42, 18, 24);
-          ctx.fillStyle = "#07060add";
-        }
-      }
-    }
-    for (let i = 0; i < 8; i++) {
-      const x = 68 + i * 162;
-      ctx.strokeStyle = "#f2cf7440";
-      ctx.strokeRect(x, 90, 62, 405);
-      for (let y = 106; y < 475; y += 42) {
+      ctx.strokeStyle = death ? "#ffb23d55" : "#f2cf7448";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 14; i++) {
+        const x = i * 96 + Math.sin(t + i) * 18;
         ctx.beginPath();
-        ctx.arc(x + 14, y, 8, 0, Math.PI * 2);
-        ctx.arc(x + 48, y + 20, 8, 0, Math.PI * 2);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(W / 2 + Math.sin(i) * 110, 420);
         ctx.stroke();
       }
-    }
-    for (let i = 0; i < 20; i++) {
-      ctx.fillStyle = i % 2 ? "#0c0a0e80" : "#f2cf7410";
-      ctx.fillRect(i * 70 - (t * 18 % 70), GROUND - 52 + Math.sin(t * 2 + i) * 8, 86, 18);
-    }
+      ctx.fillStyle = "#07060add";
+      for (let row = 0; row < 3; row++) {
+        for (let x = 60; x < W; x += 155) {
+          ctx.fillRect(x, 410 + row * 42, 110, 14);
+          ctx.fillRect(x + 8, 424 + row * 42, 10, 36);
+          if ((x + row) % 2 === 0) {
+            ctx.fillStyle = "#f2cf7425";
+            ctx.fillRect(x + 46, 386 + row * 42, 18, 24);
+            ctx.fillStyle = "#07060add";
+          }
+        }
+      }
+      for (let i = 0; i < 8; i++) {
+        const x = 68 + i * 162;
+        ctx.strokeStyle = "#f2cf7440";
+        ctx.strokeRect(x, 90, 62, 405);
+        for (let y = 106; y < 475; y += 42) {
+          ctx.beginPath();
+          ctx.arc(x + 14, y, 8, 0, Math.PI * 2);
+          ctx.arc(x + 48, y + 20, 8, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      for (let i = 0; i < 20; i++) {
+        ctx.fillStyle = i % 2 ? "#0c0a0e80" : "#f2cf7410";
+        ctx.fillRect(i * 70 - (t * 18 % 70), GROUND - 52 + Math.sin(t * 2 + i) * 8, 86, 18);
+      }
 
-    for (let i = 0; i < 24; i++) {
-      const x = (i * 83 + Math.sin(t * .8 + i) * 38 + W) % W;
-      const y = 90 + ((i * 41 + t * 24) % 330);
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(Math.sin(t + i) * .2);
-      ctx.fillStyle = "#fff7dc22";
-      ctx.fillRect(-16, -11, 32, 22);
-      ctx.fillStyle = "#f2cf7445";
-      ctx.fillRect(-10, -4, 20, 2);
-      ctx.fillRect(-10, 3, 15, 2);
-      ctx.restore();
-    }
+      for (let i = 0; i < 24; i++) {
+        const x = (i * 83 + Math.sin(t * .8 + i) * 38 + W) % W;
+        const y = 90 + ((i * 41 + t * 24) % 330);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.sin(t + i) * .2);
+        ctx.fillStyle = "#fff7dc22";
+        ctx.fillRect(-16, -11, 32, 22);
+        ctx.fillStyle = "#f2cf7445";
+        ctx.fillRect(-10, -4, 20, 2);
+        ctx.fillRect(-10, 3, 15, 2);
+        ctx.restore();
+      }
 
-    const judgeY = 126 + Math.sin(t * 2.4) * 6;
-    ctx.strokeStyle = "#f2cf7466";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(W / 2, 48);
-    ctx.lineTo(W / 2, 190);
-    ctx.moveTo(W / 2 - 145, 104);
-    ctx.lineTo(W / 2 + 145, 104);
-    ctx.stroke();
-    for (const side of [-1, 1]) {
+      const judgeY = 126 + Math.sin(t * 2.4) * 6;
+      ctx.strokeStyle = "#f2cf7466";
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(W / 2 + side * 112, 104);
-      ctx.lineTo(W / 2 + side * 74, 172);
-      ctx.lineTo(W / 2 + side * 150, 172);
-      ctx.closePath();
+      ctx.moveTo(W / 2, 48);
+      ctx.lineTo(W / 2, 190);
+      ctx.moveTo(W / 2 - 145, 104);
+      ctx.lineTo(W / 2 + 145, 104);
       ctx.stroke();
-    }
-    ctx.fillStyle = "#100e14";
-    ctx.fillRect(W / 2 - 210, 204, 420, 104);
-    ctx.strokeStyle = "#f2cf74";
-    ctx.lineWidth = trial.phase === "verdict" ? 7 : 4;
-    ctx.strokeRect(W / 2 - 210, 204, 420, 104);
-    drawJudgemanCreature(286, 308, t, death);
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(W / 2 + side * 112, 104);
+        ctx.lineTo(W / 2 + side * 74, 172);
+        ctx.lineTo(W / 2 + side * 150, 172);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#100e14";
+      ctx.fillRect(W / 2 - 210, 204, 420, 104);
+      ctx.strokeStyle = "#f2cf74";
+      ctx.lineWidth = trial.phase === "verdict" ? 7 : 4;
+      ctx.strokeRect(W / 2 - 210, 204, 420, 104);
 
-    ctx.fillStyle = death ? "#2b0a07" : "#18131b";
-    ctx.fillRect(W / 2 - 105, judgeY - 38, 210, 92);
-    ctx.fillStyle = death ? "#ffb23d" : "#f2cf74";
-    ctx.fillRect(W / 2 - 70, judgeY - 14, 140, 12);
-    ctx.fillRect(W / 2 - 48, judgeY + 12, 96, 12);
-    ctx.fillStyle = "#fff7dc";
-    ctx.font = '10px "Press Start 2P", monospace';
-    ctx.textAlign = "center";
-    ctx.fillText(trial.phase === "verdict" ? "JUDGEMAN DECIDES" : "JUDGEMAN", W / 2, 244);
-    if (trial.phase === "verdict") {
-      ctx.fillStyle = death ? "#ff3d28" : "#fff1a8";
-      ctx.fillRect(W / 2 - 42, judgeY - 4, 24, 8);
-      ctx.fillRect(W / 2 + 18, judgeY - 4, 24, 8);
-    }
-    if (trial.phase === "verdict" || trial.phase === "verdictClash") {
-      ctx.save();
-      ctx.translate(W / 2 + 190, 126);
-      ctx.rotate(Math.sin(t * 8) * .08);
-      ctx.fillStyle = "#f2cf74";
-      ctx.fillRect(-55, -8, 110, 16);
-      ctx.fillRect(-13, -38, 26, 60);
-      ctx.restore();
+      const casterSlot = Number(trial.casterSlot || 0);
+      const caster = game.online.active
+        ? (casterSlot && casterSlot !== game.online.slot ? game.enemy : game.player)
+        : (game.player?.character === "higuruma" ? game.player : game.enemy?.character === "higuruma" ? game.enemy : game.player);
+      const judgemanX = clamp(Number(caster?.x ?? 286), 138, W - 138);
+      const judgemanY = clamp(Number(caster?.y ?? GROUND) - 212, 220, 360);
+      drawJudgemanCreature(judgemanX, judgemanY, t, death);
+
+      ctx.fillStyle = death ? "#2b0a07" : "#18131b";
+      ctx.fillRect(W / 2 - 105, judgeY - 38, 210, 92);
+      ctx.fillStyle = death ? "#ffb23d" : "#f2cf74";
+      ctx.fillRect(W / 2 - 70, judgeY - 14, 140, 12);
+      ctx.fillRect(W / 2 - 48, judgeY + 12, 96, 12);
+      ctx.fillStyle = "#fff7dc";
+      ctx.font = '10px "Press Start 2P", monospace';
+      ctx.textAlign = "center";
+      ctx.fillText(trial.phase === "verdict" ? "JUDGEMAN DECIDES" : "JUDGEMAN", W / 2, 244);
+      if (trial.phase === "verdict") {
+        ctx.fillStyle = death ? "#ff3d28" : "#fff1a8";
+        ctx.fillRect(W / 2 - 42, judgeY - 4, 24, 8);
+        ctx.fillRect(W / 2 + 18, judgeY - 4, 24, 8);
+      }
+      if (trial.phase === "verdict" || trial.phase === "verdictClash") {
+        ctx.save();
+        ctx.translate(W / 2 + 190, 126);
+        ctx.rotate(Math.sin(t * 8) * .08);
+        ctx.fillStyle = "#f2cf74";
+        ctx.fillRect(-55, -8, 110, 16);
+        ctx.fillRect(-13, -38, 26, 60);
+        ctx.restore();
+      }
+
+      if (backgroundOnly) {
+        ctx.restore();
+        return;
+      }
     }
 
+    ctx.globalAlpha = 1;
     drawJudgemanSpeechBox(trial, t, death);
-
-    drawTrialCourtFigure("PROSECUTOR", 286, 378, "higuruma", true);
-    drawTrialCourtFigure("DEFENDANT", W - 286, 378, trial.targetCharacter || game.enemy?.character || "sukuna", false);
 
     ctx.textAlign = "center";
     ctx.fillStyle = "#f2cf74";
@@ -6256,6 +6271,7 @@
     drawBackground();
     if (game.state !== "menu") {
       drawDomain();
+      drawTrialCourtroom("background");
       drawProps();
       for (const a of game.afterimages) drawFighter(a, a.life / a.maxLife * .45, a.color);
       drawProjectiles();
@@ -6282,7 +6298,7 @@
     }
     ctx.restore();
     drawDomainClashTableau();
-    drawTrialCourtroom();
+    drawTrialCourtroom("ui");
     for (const fighter of [game.player, game.enemy]) {
       if (fighter?.attack?.type === "executionSword") {
         const a = fighter.attack;
@@ -6553,6 +6569,8 @@
       clearTrialState();
       announce(event.slot === game.online.slot ? "DOMAIN BROKEN" : "OPPONENT DOMAIN BROKEN");
     } else if (event.kind === "trialCharge") {
+      game.domainCharacter = "higuruma";
+      game.domainOwnerSlot = Number(event.casterSlot || 0);
       game.trial = {
         phase: "charge",
         online: true,
@@ -7011,9 +7029,13 @@
     const snapshotTrial = normalizeTrialSnapshot(snapshot.trial);
     if (snapshotTrial && !game.trial) {
       game.trial = snapshotTrial;
+      game.domainCharacter = "higuruma";
+      game.domainOwnerSlot = Number(snapshotTrial.casterSlot || 0);
       game.windPaused = true;
     } else if (snapshotTrial && game.trial) {
       Object.assign(game.trial, snapshotTrial);
+      game.domainCharacter = "higuruma";
+      game.domainOwnerSlot = Number(snapshotTrial.casterSlot || 0);
       game.windPaused = true;
     } else if (!snapshotTrial && game.trial?.online) {
       clearTrialState();
