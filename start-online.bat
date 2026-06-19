@@ -10,6 +10,16 @@ if /i not "%NODE%"=="node" if not exist "%NODE%" (
   pause
   exit /b 1
 )
+echo.
+echo Google Sign-In setup:
+echo Paste your Google OAuth Web Client ID, or leave blank for Guest Mode only.
+set "GOOGLE_CLIENT_ID="
+set /p "GOOGLE_CLIENT_ID=Google OAuth Web Client ID: "
+if "%GOOGLE_CLIENT_ID%"=="" (
+  echo Starting without Google Sign-In. Guest Mode will still work.
+) else (
+  echo Google Sign-In Client ID loaded for this server session.
+)
 start "" "http://localhost:4173"
 "%NODE%" "%~dp0server.js"
 pause
