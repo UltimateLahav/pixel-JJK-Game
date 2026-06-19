@@ -92,6 +92,12 @@
     menuAccountAvatar: $("#menuAccountAvatar"),
     menuAccountName: $("#menuAccountName"),
     menuAccountMode: $("#menuAccountMode"),
+    settingsPanel: $("#settingsPanel"),
+    settingsButton: $("#settingsButton"),
+    settingsBack: $("#settingsBack"),
+    musicVolume: $("#musicVolume"),
+    musicVolumeValue: $("#musicVolumeValue"),
+    resetSettings: $("#resetSettings"),
   };
 
   const W = canvas.width;
@@ -119,11 +125,14 @@
   let onlineSelection = false;
   const GOOGLE_CLIENT_ID = "GOOGLE_CLIENT_ID_HERE";
   const GUEST_PROGRESS_KEY = "guestProgress";
+  const GAME_SETTINGS_KEY = "voidLimitSettings";
   const SERVER_ACCOUNTS_AVAILABLE = location.protocol !== "file:";
   const HAKARI_JACKPOT_DURATION = 33.2;
   const HAKARI_JACKPOT_TRACK = "assets/hakari-jackpot.mp3";
+  const DEFAULT_MUSIC_VOLUME = 0.58;
   let selectionLocked = false;
   let onlineLockRequest = null;
+  let gameSettings = null;
   let audioCtx = null;
   let master = null;
   let hakariJackpotMusic = null;
@@ -611,14 +620,68 @@
     source.start();
   }
 
+  function loadGameSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(GAME_SETTINGS_KEY) || "{}");
+      return { musicVolume: clamp(Number(saved.musicVolume ?? DEFAULT_MUSIC_VOLUME), 0, 1) };
+    } catch {
+      return { musicVolume: DEFAULT_MUSIC_VOLUME };
+    }
+  }
+
+  function saveGameSettings() {
+    try { localStorage.setItem(GAME_SETTINGS_KEY, JSON.stringify(gameSettings || loadGameSettings())); } catch {}
+  }
+
+  function currentMusicVolume() {
+    return clamp(Number(gameSettings?.musicVolume ?? DEFAULT_MUSIC_VOLUME), 0, 1);
+  }
+
+  function updateSettingsUi() {
+    const percent = Math.round(currentMusicVolume() * 100);
+    if (ui.musicVolume) ui.musicVolume.value = String(percent);
+    if (ui.musicVolumeValue) ui.musicVolumeValue.textContent = `${percent}%`;
+  }
+
+  function applyMusicVolume() {
+    if (hakariJackpotMusic) hakariJackpotMusic.volume = currentMusicVolume();
+    updateSettingsUi();
+  }
+
+  function setMusicVolume(percent) {
+    gameSettings = gameSettings || loadGameSettings();
+    gameSettings.musicVolume = clamp(Number(percent) / 100, 0, 1);
+    saveGameSettings();
+    applyMusicVolume();
+  }
+
+  function openSettingsPanel() {
+    ui.menu.classList.add("hidden");
+    ui.onlineMenu?.classList.add("hidden");
+    ui.accountPanel?.classList.add("hidden");
+    ui.settingsPanel?.classList.remove("hidden");
+    updateSettingsUi();
+  }
+
+  function closeSettingsPanel() {
+    ui.settingsPanel?.classList.add("hidden");
+    if (game.state === "menu") ui.menu.classList.remove("hidden");
+  }
+
+  function initSettingsSystem() {
+    gameSettings = loadGameSettings();
+    applyMusicVolume();
+  }
+
   function startHakariJackpotMusic() {
     try {
       if (!hakariJackpotMusic) {
         hakariJackpotMusic = new Audio(HAKARI_JACKPOT_TRACK);
         hakariJackpotMusic.loop = true;
-        hakariJackpotMusic.volume = 0.58;
+        hakariJackpotMusic.volume = currentMusicVolume();
         hakariJackpotMusic.preload = "auto";
       }
+      applyMusicVolume();
       if (hakariJackpotMusicPlaying) return;
       hakariJackpotMusic.currentTime = 0;
       hakariJackpotMusicPlaying = true;
@@ -980,6 +1043,7 @@
     game.jackpotFlash = 0;
     resetProps();
     ui.menu.classList.add("hidden");
+    ui.settingsPanel?.classList.add("hidden");
     ui.result.classList.add("hidden");
     ui.pause.classList.add("hidden");
     ui.clash.classList.add("hidden");
@@ -1067,6 +1131,7 @@
     ui.pause.classList.add("hidden");
     ui.result.classList.add("hidden");
     ui.clash.classList.add("hidden");
+    ui.settingsPanel?.classList.add("hidden");
     ui.menu.classList.remove("hidden");
   }
 
@@ -4705,6 +4770,7 @@
   function openAccountPanel() {
     ui.menu.classList.add("hidden");
     ui.onlineMenu?.classList.add("hidden");
+    ui.settingsPanel?.classList.add("hidden");
     ui.accountPanel.classList.remove("hidden");
     updateAccountUi();
     if (!SERVER_ACCOUNTS_AVAILABLE) {
@@ -8096,6 +8162,10 @@
   });
 
   $("#start").addEventListener("click", startOfflineSelection);
+  ui.settingsButton?.addEventListener("click", openSettingsPanel);
+  ui.settingsBack?.addEventListener("click", closeSettingsPanel);
+  ui.musicVolume?.addEventListener("input", () => setMusicVolume(ui.musicVolume.value));
+  ui.resetSettings?.addEventListener("click", () => setMusicVolume(DEFAULT_MUSIC_VOLUME * 100));
   ui.accountButton?.addEventListener("click", openAccountPanel);
   ui.accountBack?.addEventListener("click", closeAccountPanel);
   ui.guestModeButton?.addEventListener("click", () => {
@@ -8222,6 +8292,7 @@
   setTimeout(() => $("#boot").classList.add("done"), 1150);
   refreshCostumes();
   selectStage(selectedStage);
+  initSettingsSystem();
   initAccountSystem();
   requestAnimationFrame(frame);
 })();
