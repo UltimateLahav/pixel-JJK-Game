@@ -7,6 +7,7 @@ const MAX_HEALTH = 600;
 const MAX_ROLLBACK = 60;
 const SNAPSHOT_INTERVAL = 3;
 const DOMAIN_STARTUP_TICKS = 141;
+const HAKARI_JACKPOT_TICKS = 1992;
 const EMPTY_INPUT = Object.freeze({
   move: 0, jump: false, dash: false, block: false, charge: false,
   light: false, heavy: false, special: "", specialHeld: "", specialRelease: "",
@@ -1372,7 +1373,7 @@ class AuthoritativeMatch {
     const number = 1 + this.deterministicPercent(player, 419) % 7;
     player.hakariRollAttempts = attempt;
     if (roll < jackpotNumerator) {
-      player.jackpotTicks = 2280;
+      player.jackpotTicks = HAKARI_JACKPOT_TICKS;
       player.domainTicks = 0;
       player.energy = 100;
       this.events.push({
@@ -1643,7 +1644,7 @@ class AuthoritativeMatch {
       const winner = this.clash.power > 50 ? this.players[1] : this.players[2];
       const loser = winner.slot === 1 ? this.players[2] : this.players[1];
       if (domainClash && winner.character === "hakari") {
-        winner.jackpotTicks = 2280;
+        winner.jackpotTicks = HAKARI_JACKPOT_TICKS;
         winner.energy = 100;
         winner.domainTicks = 0;
       } else if (domainClash && winner.character === "higuruma") {
