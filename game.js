@@ -42,6 +42,7 @@
     training: $("#trainingData"),
     resultTitle: $("#resultTitle"),
     resultSub: $("#resultSub"),
+    resultAccount: $("#resultAccount"),
     score: $("#scoreStat"),
     maxCombo: $("#comboStat"),
     parries: $("#parryStat"),
@@ -73,6 +74,24 @@
     onlineMenu: $("#onlineMenu"),
     onlineLobby: $("#onlineLobby"),
     onlineHome: $("#onlineHome"),
+    accountPanel: $("#accountPanel"),
+    accountButton: $("#accountButton"),
+    accountButtonMode: $("#accountButtonMode"),
+    accountBack: $("#accountBack"),
+    guestModeButton: $("#guestModeButton"),
+    googleFallbackButton: $("#googleFallbackButton"),
+    googleButtonMount: $("#googleButtonMount"),
+    accountAvatar: $("#accountAvatar"),
+    accountName: $("#accountName"),
+    accountEmail: $("#accountEmail"),
+    accountStatus: $("#accountStatus"),
+    accountMode: $("#accountMode"),
+    accountStats: $("#accountStats"),
+    accountSignOut: $("#accountSignOut"),
+    menuAccount: $("#menuAccount"),
+    menuAccountAvatar: $("#menuAccountAvatar"),
+    menuAccountName: $("#menuAccountName"),
+    menuAccountMode: $("#menuAccountMode"),
   };
 
   const W = canvas.width;
@@ -98,10 +117,17 @@
   let selectedCharacter = "gojo";
   let pendingOfflineSelection = false;
   let onlineSelection = false;
+  const GOOGLE_CLIENT_ID = "GOOGLE_CLIENT_ID_HERE";
+  const GUEST_PROGRESS_KEY = "guestProgress";
+  const SERVER_ACCOUNTS_AVAILABLE = location.protocol !== "file:";
+  const HAKARI_JACKPOT_DURATION = 33.2;
+  const HAKARI_JACKPOT_TRACK = "assets/hakari-jackpot.mp3";
   let selectionLocked = false;
   let onlineLockRequest = null;
   let audioCtx = null;
   let master = null;
+  let hakariJackpotMusic = null;
+  let hakariJackpotMusicPlaying = false;
   let lastTime = performance.now();
   let onlineAccumulator = 0;
 
@@ -585,6 +611,40 @@
     source.start();
   }
 
+  function startHakariJackpotMusic() {
+    try {
+      if (!hakariJackpotMusic) {
+        hakariJackpotMusic = new Audio(HAKARI_JACKPOT_TRACK);
+        hakariJackpotMusic.loop = true;
+        hakariJackpotMusic.volume = 0.58;
+        hakariJackpotMusic.preload = "auto";
+      }
+      if (hakariJackpotMusicPlaying) return;
+      hakariJackpotMusic.currentTime = 0;
+      hakariJackpotMusicPlaying = true;
+      const playing = hakariJackpotMusic.play();
+      if (playing?.catch) playing.catch(() => { hakariJackpotMusicPlaying = false; });
+    } catch {
+      hakariJackpotMusicPlaying = false;
+    }
+  }
+
+  function stopHakariJackpotMusic() {
+    if (!hakariJackpotMusic) return;
+    try {
+      hakariJackpotMusic.pause();
+      hakariJackpotMusic.currentTime = 0;
+    } catch {}
+    hakariJackpotMusicPlaying = false;
+  }
+
+  function syncHakariJackpotMusic() {
+    const localJackpot = game.player?.character === "hakari" && game.player.jackpot > 0;
+    const remoteJackpot = game.enemy?.character === "hakari" && game.enemy.jackpot > 0;
+    if (game.state === "playing" && (localJackpot || remoteJackpot)) startHakariJackpotMusic();
+    else stopHakariJackpotMusic();
+  }
+
   function makePlayer() {
     return {
       kind: "player",
@@ -870,6 +930,7 @@
 
   function startGame() {
     initAudio();
+    stopHakariJackpotMusic();
     game.mode = selectedMode;
     if (selectedMode !== "online") {
       game.online.active = false;
@@ -1000,6 +1061,7 @@
   }
 
   function quitToMenu() {
+    stopHakariJackpotMusic();
     game.state = "menu";
     ui.hud.classList.add("hidden");
     ui.pause.classList.add("hidden");
@@ -2730,10 +2792,10 @@
 
   function startJackpot(fromClash = false) {
     const p = game.player;
-    p.jackpot = 38;
+    p.jackpot = HAKARI_JACKPOT_DURATION;
     p.energy = 100;
     p.health = Math.min(p.maxHealth, p.health + 18);
-    p.awakening = 38;
+    p.awakening = HAKARI_JACKPOT_DURATION;
     p.damageScale = 1.28;
     p.heat = 100;
     p.stun = 0;
@@ -2751,7 +2813,8 @@
     spawnParticles(p.x, p.y - 60, "#fff35d", 45, 560, 8, 1);
     tone(220, 1.1, "square", .35, 660);
     noise(.35, .2);
-    if (game.online.active) sendOnline("event", { kind: "jackpot", duration: 38 });
+    startHakariJackpotMusic();
+    if (game.online.active) sendOnline("event", { kind: "jackpot", duration: HAKARI_JACKPOT_DURATION });
   }
 
   function shatterHakariDomain(forced = false, message = "GAMBLE SHATTERED") {
@@ -2788,6 +2851,7 @@
         p.damageScale = 1;
         p.energy = 55;
         p.heat = 62;
+        stopHakariJackpotMusic();
         announce("JACKPOT ENDED");
       }
     }
@@ -4234,6 +4298,7 @@
   }
 
   function finishGame(won, draw = false) {
+    stopHakariJackpotMusic();
     game.state = "result";
     ui.hud.classList.add("hidden");
     ui.result.classList.remove("hidden");
@@ -4274,6 +4339,7 @@
     }
     if (won && game.mode === "story") unlockCostume("snowfall");
     if (won && game.mode === "boss") unlockCostume("eclipse");
+    recordMatchProgress(won, draw);
     if (won && game.player.character === "sukuna") speakLine("You never stood a chance.");
     tone(won ? 330 : 90, .8, won ? "sine" : "sawtooth", .25, won ? 550 : -40);
   }
@@ -4317,6 +4383,393 @@
       const available = unlocked.has(button.dataset.costume);
       button.classList.toggle("locked", !available);
       button.classList.toggle("unlocked", available);
+    });
+  }
+
+  function blankAccountProgress() {
+    return {
+      stats: {
+        totalWins: 0,
+        totalLosses: 0,
+        bestSurvivalWave: 0,
+        bossRushClears: 0,
+        maxCombo: 0,
+        blackFlashes: 0,
+        domainsUsed: 0,
+        charactersPlayed: {},
+      },
+      unlocks: { costumes: ["uniform"], titles: [], badges: [] },
+      settings: { lastCharacter: selectedCharacter, lastStage: selectedStage, lastCostume: selectedCostume, difficulty },
+    };
+  }
+
+  function accountNumber(value) {
+    return Math.max(0, Math.floor(Number(value) || 0));
+  }
+
+  function cleanList(values, fallback = []) {
+    const out = new Set(fallback);
+    if (Array.isArray(values)) values.forEach((value) => {
+      const clean = String(value || "").replace(/[<>&]/g, "").trim().slice(0, 40);
+      if (clean) out.add(clean);
+    });
+    return [...out];
+  }
+
+  function normalizeProgress(progress = {}) {
+    const base = blankAccountProgress();
+    const stats = progress.stats || {};
+    base.stats.totalWins = accountNumber(stats.totalWins);
+    base.stats.totalLosses = accountNumber(stats.totalLosses);
+    base.stats.bestSurvivalWave = accountNumber(stats.bestSurvivalWave);
+    base.stats.bossRushClears = accountNumber(stats.bossRushClears);
+    base.stats.maxCombo = accountNumber(stats.maxCombo);
+    base.stats.blackFlashes = accountNumber(stats.blackFlashes);
+    base.stats.domainsUsed = accountNumber(stats.domainsUsed);
+    if (stats.charactersPlayed && typeof stats.charactersPlayed === "object") {
+      for (const [character, count] of Object.entries(stats.charactersPlayed)) {
+        const id = String(character || "").replace(/[<>&]/g, "").trim().slice(0, 32);
+        if (id) base.stats.charactersPlayed[id] = accountNumber(count);
+      }
+    }
+    const unlocks = progress.unlocks || {};
+    base.unlocks.costumes = cleanList(unlocks.costumes, ["uniform"]);
+    base.unlocks.titles = cleanList(unlocks.titles);
+    base.unlocks.badges = cleanList(unlocks.badges);
+    const settings = progress.settings || {};
+    for (const key of ["lastCharacter", "lastStage", "lastCostume", "difficulty"]) {
+      const clean = String(settings[key] || "").replace(/[<>&]/g, "").trim().slice(0, 48);
+      if (clean) base.settings[key] = clean;
+    }
+    return base;
+  }
+
+  function mergeProgress(baseProgress, incomingProgress) {
+    const base = normalizeProgress(baseProgress);
+    const incoming = normalizeProgress(incomingProgress);
+    for (const key of ["totalWins", "totalLosses", "bossRushClears", "blackFlashes", "domainsUsed"]) {
+      base.stats[key] = accountNumber(base.stats[key]) + accountNumber(incoming.stats[key]);
+    }
+    base.stats.bestSurvivalWave = Math.max(base.stats.bestSurvivalWave, incoming.stats.bestSurvivalWave);
+    base.stats.maxCombo = Math.max(base.stats.maxCombo, incoming.stats.maxCombo);
+    for (const [character, count] of Object.entries(incoming.stats.charactersPlayed)) {
+      base.stats.charactersPlayed[character] = accountNumber(base.stats.charactersPlayed[character]) + accountNumber(count);
+    }
+    base.unlocks.costumes = cleanList(incoming.unlocks.costumes, base.unlocks.costumes);
+    base.unlocks.titles = cleanList(incoming.unlocks.titles, base.unlocks.titles);
+    base.unlocks.badges = cleanList(incoming.unlocks.badges, base.unlocks.badges);
+    base.settings = { ...base.settings, ...incoming.settings };
+    return base;
+  }
+
+  function progressFromProfile(profile = {}) {
+    return normalizeProgress({ stats: profile.stats, unlocks: profile.unlocks, settings: profile.settings });
+  }
+
+  function loadGuestProgress() {
+    try {
+      const saved = normalizeProgress(JSON.parse(localStorage.getItem(GUEST_PROGRESS_KEY) || "{}"));
+      saved.unlocks.costumes = cleanList(unlockedCostumes(), saved.unlocks.costumes);
+      return saved;
+    } catch {
+      const fallback = blankAccountProgress();
+      fallback.unlocks.costumes = cleanList(unlockedCostumes(), ["uniform"]);
+      return fallback;
+    }
+  }
+
+  function saveGuestProgress(progress) {
+    try { localStorage.setItem(GUEST_PROGRESS_KEY, JSON.stringify(normalizeProgress(progress))); } catch {}
+  }
+
+  function syncLocalUnlocks(progress) {
+    const costumes = cleanList(progress?.unlocks?.costumes, unlockedCostumes());
+    try { localStorage.setItem("voidLimitCostumes", JSON.stringify(costumes)); } catch {}
+    refreshCostumes();
+  }
+
+  function accountRequest(path, options = {}) {
+    if (!SERVER_ACCOUNTS_AVAILABLE) return Promise.reject(new Error("Server required for accounts"));
+    return fetch(path, {
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    }).then(async (response) => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "Cloud save failed, local save kept");
+      return data;
+    });
+  }
+
+  function setAccountStatus(message, kind = "") {
+    if (!ui.accountStatus) return;
+    ui.accountStatus.textContent = message;
+    ui.accountStatus.classList.toggle("error", kind === "error");
+    ui.accountStatus.classList.toggle("ok", kind === "ok");
+  }
+
+  function setAccountAvatar(img, url) {
+    if (!img) return;
+    const frame = img.parentElement;
+    const hasImage = Boolean(url);
+    img.src = hasImage ? url : "";
+    frame?.classList.toggle("has-image", hasImage);
+  }
+
+  function setOnlineDefaultName(name) {
+    const input = $("#onlineName");
+    if (!input || !name) return;
+    const current = input.value.trim();
+    if (!current || current === "Gojo" || current === "Guest Fighter") input.value = name.slice(0, 16);
+  }
+
+  function applySavedSettings(progress) {
+    const settings = progress?.settings || {};
+    if (characters[settings.lastCharacter]) selectedCharacter = settings.lastCharacter;
+    if (stages[settings.lastStage]) selectedStage = settings.lastStage;
+    const costumeSet = new Set(cleanList(progress?.unlocks?.costumes, unlockedCostumes()));
+    if (settings.lastCostume && costumeSet.has(settings.lastCostume)) selectedCostume = settings.lastCostume;
+    if (["easy", "normal", "hard"].includes(settings.difficulty)) difficulty = settings.difficulty;
+    $$(".difficulty button").forEach((button) => button.classList.toggle("active", button.dataset.diff === difficulty));
+    $$(".costumes button").forEach((button) => button.classList.toggle("active", button.dataset.costume === selectedCostume));
+    if (stages[selectedStage]) selectStage(selectedStage);
+  }
+
+  function updateAccountUi() {
+    const profile = accountState.user;
+    const progress = accountState.progress || loadGuestProgress();
+    const signed = Boolean(profile && !accountState.isGuest);
+    const name = signed ? profile.displayName || "Void Fighter" : "Guest Fighter";
+    ui.menuAccount?.classList.toggle("signed", signed);
+    ui.menuAccount?.classList.toggle("guest", !signed);
+    if (ui.menuAccountName) ui.menuAccountName.textContent = name;
+    if (ui.menuAccountMode) ui.menuAccountMode.textContent = signed ? "SIGNED IN" : "GUEST MODE";
+    if (ui.accountButtonMode) ui.accountButtonMode.textContent = signed ? "SIGNED" : "GUEST";
+    if (ui.accountName) ui.accountName.textContent = name;
+    if (ui.accountEmail) ui.accountEmail.textContent = signed ? profile.email || "Google account" : "Offline progress stays on this browser.";
+    if (ui.accountMode) {
+      ui.accountMode.textContent = signed ? "SIGNED IN" : "GUEST MODE";
+      ui.accountMode.classList.toggle("signed", signed);
+      ui.accountMode.classList.toggle("guest", !signed);
+    }
+    setAccountAvatar(ui.accountAvatar, signed ? profile.picture : "");
+    setAccountAvatar(ui.menuAccountAvatar, signed ? profile.picture : "");
+    ui.accountSignOut?.classList.toggle("hidden", !signed);
+    const values = [
+      progress.stats.totalWins,
+      progress.stats.bestSurvivalWave,
+      progress.stats.maxCombo,
+      progress.stats.domainsUsed,
+    ];
+    ui.accountStats?.querySelectorAll("b").forEach((node, index) => {
+      node.textContent = String(values[index] || 0);
+    });
+    if (ui.resultAccount) ui.resultAccount.textContent = signed ? `SIGNED IN: ${name}` : "GUEST MODE - LOCAL SAVE";
+  }
+
+  async function accountLogin(credential) {
+    setAccountStatus("Signing in with Google...");
+    try {
+      const data = await accountRequest("/api/auth/google", { method: "POST", body: JSON.stringify({ credential }) });
+      accountState.user = data.user;
+      accountState.isGuest = false;
+      accountState.progress = progressFromProfile(data.user);
+      syncLocalUnlocks(accountState.progress);
+      setOnlineDefaultName(data.user.displayName || "");
+      await accountMergeGuestProgress();
+      setAccountStatus("Signed in. Progress synced.", "ok");
+      updateAccountUi();
+      window.dispatchEvent(new CustomEvent("voidlimit:accountUpdated", { detail: { user: accountState.user } }));
+    } catch (error) {
+      setAccountStatus(error.message || "Login failed, continue as guest", "error");
+    }
+  }
+
+  async function accountLogout() {
+    try { await accountRequest("/api/auth/logout", { method: "POST", body: "{}" }); } catch {}
+    accountState.user = null;
+    accountState.isGuest = true;
+    accountState.progress = loadGuestProgress();
+    setAccountStatus("Signed out. Guest mode is active.");
+    updateAccountUi();
+    window.dispatchEvent(new CustomEvent("voidlimit:accountUpdated", { detail: { user: null } }));
+  }
+
+  async function accountLoadProgress() {
+    accountState.progress = loadGuestProgress();
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      accountState.user = null;
+      accountState.isGuest = true;
+      setAccountStatus("Google accounts require running the server. Guest mode is available.");
+      updateAccountUi();
+      return accountState.progress;
+    }
+    try {
+      const data = await accountRequest("/api/me");
+      if (data.user) {
+        accountState.user = data.user;
+        accountState.isGuest = false;
+        accountState.progress = progressFromProfile(data.user);
+        syncLocalUnlocks(accountState.progress);
+        setOnlineDefaultName(data.user.displayName || "");
+        await accountMergeGuestProgress();
+        setAccountStatus("Signed in. Progress loaded.", "ok");
+      } else {
+        accountState.user = null;
+        accountState.isGuest = true;
+        setAccountStatus(
+          GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE"
+            ? "Google login unavailable. Add your Google OAuth Client ID first."
+            : "Guest mode is active.",
+          GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE" ? "error" : "",
+        );
+      }
+    } catch {
+      accountState.user = null;
+      accountState.isGuest = true;
+      setAccountStatus("Google login unavailable. Guest mode is active.", "error");
+    }
+    updateAccountUi();
+    return accountState.progress;
+  }
+
+  async function accountSaveProgress(delta) {
+    const cleanDelta = normalizeProgress(delta);
+    if (accountState.isGuest || !accountState.user) {
+      accountState.progress = mergeProgress(loadGuestProgress(), cleanDelta);
+      saveGuestProgress(accountState.progress);
+      syncLocalUnlocks(accountState.progress);
+      setAccountStatus("Guest progress saved locally.", "ok");
+      updateAccountUi();
+      return accountState.progress;
+    }
+    accountState.progress = mergeProgress(accountState.progress, cleanDelta);
+    updateAccountUi();
+    try {
+      const data = await accountRequest("/api/save-progress", { method: "POST", body: JSON.stringify({ progress: cleanDelta }) });
+      accountState.user = data.user;
+      accountState.progress = progressFromProfile(data.user);
+      syncLocalUnlocks(accountState.progress);
+      setAccountStatus("Progress saved.", "ok");
+    } catch {
+      const guest = mergeProgress(loadGuestProgress(), cleanDelta);
+      saveGuestProgress(guest);
+      setAccountStatus("Cloud save failed, local save kept.", "error");
+    }
+    updateAccountUi();
+    return accountState.progress;
+  }
+
+  async function accountMergeGuestProgress() {
+    if (accountState.isGuest || !accountState.user) return;
+    const guest = loadGuestProgress();
+    try {
+      const data = await accountRequest("/api/save-progress", { method: "POST", body: JSON.stringify({ progress: guest }) });
+      accountState.user = data.user;
+      accountState.progress = progressFromProfile(data.user);
+      syncLocalUnlocks(accountState.progress);
+      localStorage.removeItem(GUEST_PROGRESS_KEY);
+    } catch {
+      setAccountStatus("Cloud merge failed, guest save kept locally.", "error");
+    }
+  }
+
+  function matchProgressDelta(won, draw) {
+    const stats = game.mode === "online" ? getOnlineStats() : {
+      blackFlashes: game.player?.blackFlashes || 0,
+      domains: game.player?.domainUsed ? 1 : 0,
+    };
+    const delta = blankAccountProgress();
+    delta.stats.totalWins = won && !draw ? 1 : 0;
+    delta.stats.totalLosses = !won && !draw ? 1 : 0;
+    delta.stats.bestSurvivalWave = game.mode === "survival" ? game.wave : 0;
+    delta.stats.bossRushClears = won && game.mode === "boss" ? 1 : 0;
+    delta.stats.maxCombo = game.maxCombo || 0;
+    delta.stats.blackFlashes = stats.blackFlashes || 0;
+    delta.stats.domainsUsed = stats.domains || 0;
+    delta.stats.charactersPlayed[selectedCharacter] = 1;
+    delta.unlocks.costumes = unlockedCostumes();
+    delta.settings = {
+      lastCharacter: selectedCharacter,
+      lastStage: selectedStage,
+      lastCostume: selectedCostume,
+      difficulty,
+    };
+    return delta;
+  }
+
+  function recordMatchProgress(won, draw) {
+    accountSaveProgress(matchProgressDelta(won, draw));
+  }
+
+  function openAccountPanel() {
+    ui.menu.classList.add("hidden");
+    ui.onlineMenu?.classList.add("hidden");
+    ui.accountPanel.classList.remove("hidden");
+    updateAccountUi();
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      setAccountStatus("Google accounts require running the server. Guest mode is available.", "error");
+    }
+  }
+
+  function closeAccountPanel() {
+    ui.accountPanel.classList.add("hidden");
+    if (game.state === "menu") ui.menu.classList.remove("hidden");
+  }
+
+  function initGoogleLogin() {
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      setAccountStatus("Google accounts require running the server. Guest mode is available.");
+      return;
+    }
+    if (GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE") {
+      setAccountStatus("Google login unavailable. Add your Google OAuth Client ID first.", "error");
+      return;
+    }
+    let attempts = 0;
+    const tryInit = () => {
+      if (!window.google?.accounts?.id) {
+        if (attempts++ < 20) setTimeout(tryInit, 250);
+        return;
+      }
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: (response) => accountLogin(response.credential),
+      });
+      if (ui.googleButtonMount && !ui.googleButtonMount.childElementCount) {
+        window.google.accounts.id.renderButton(ui.googleButtonMount, {
+          theme: "filled_black",
+          size: "large",
+          text: "signin_with",
+          shape: "rectangular",
+          width: 240,
+        });
+        ui.googleFallbackButton?.classList.add("hidden");
+      }
+    };
+    tryInit();
+  }
+
+  const accountState = {
+    user: null,
+    isGuest: true,
+    progress: null,
+    login: accountLogin,
+    logout: accountLogout,
+    loadProgress: accountLoadProgress,
+    saveProgress: accountSaveProgress,
+    mergeGuestProgress: accountMergeGuestProgress,
+  };
+  window.VoidLimitAccount = accountState;
+
+  function initAccountSystem() {
+    accountState.progress = loadGuestProgress();
+    updateAccountUi();
+    initGoogleLogin();
+    accountLoadProgress().then((progress) => {
+      syncLocalUnlocks(progress);
+      applySavedSettings(progress);
+      updateAccountUi();
     });
   }
 
@@ -4484,6 +4937,7 @@
   }
 
   function update(dt) {
+    syncHakariJackpotMusic();
     if (game.state !== "playing") return;
     if (game.online.active && Date.now() < game.online.startAt) {
       updateEffects(dt);
@@ -6841,11 +7295,17 @@
       game.shake = Math.max(game.shake, event.kind === "gavelSentence" ? 17 : 10);
     } else if (event.kind === "jackpot") {
       announce(event.slot === game.online.slot ? "JACKPOT" : "OPPONENT HIT JACKPOT");
+      const jackpotFighter = event.slot === game.online.slot ? game.player : game.enemy;
+      if (jackpotFighter?.character === "hakari") {
+        jackpotFighter.jackpot = HAKARI_JACKPOT_DURATION;
+        jackpotFighter.awakening = HAKARI_JACKPOT_DURATION;
+      }
       if (game.hakariDomain && Array.isArray(event.slots)) game.hakariDomain.displaySlots = event.slots;
       game.hakariDomain = null;
       game.jackpotFlash = 1.2;
       game.flash = .3;
       game.shake = 16;
+      startHakariJackpotMusic();
     } else if (event.kind === "failedRoll") {
       if (game.hakariDomain && Array.isArray(event.slots)) {
         game.hakariDomain.displaySlots = event.slots;
@@ -7301,12 +7761,13 @@
     } else if (event.kind === "purpleCollapse") {
       showPurpleCollapse(event.x, event.y);
     } else if (event.kind === "jackpot") {
-      game.enemy.jackpot = Number(event.duration || 38);
+      game.enemy.jackpot = Number(event.duration || HAKARI_JACKPOT_DURATION);
       game.enemy.awakening = game.enemy.jackpot;
       game.jackpotFlash = 1.1;
       game.flash = .3;
       game.shake = 15;
       spawnParticles(game.enemy.x, game.enemy.y - 60, "#5cff91", 70, 620, 9, 1);
+      startHakariJackpotMusic();
       announce("OPPONENT HIT JACKPOT");
     }
   }
@@ -7323,6 +7784,7 @@
   }
 
   function returnOnlineLobby() {
+    stopHakariJackpotMusic();
     game.state = "menu";
     game.online.resultReported = false;
     ui.hud.classList.add("hidden");
@@ -7634,6 +8096,29 @@
   });
 
   $("#start").addEventListener("click", startOfflineSelection);
+  ui.accountButton?.addEventListener("click", openAccountPanel);
+  ui.accountBack?.addEventListener("click", closeAccountPanel);
+  ui.guestModeButton?.addEventListener("click", () => {
+    accountState.isGuest = true;
+    accountState.user = null;
+    accountState.progress = loadGuestProgress();
+    setAccountStatus("Guest mode is active.");
+    updateAccountUi();
+    closeAccountPanel();
+  });
+  ui.googleFallbackButton?.addEventListener("click", () => {
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      setAccountStatus("Google accounts require running the server. Guest mode is available.", "error");
+      return;
+    }
+    if (GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE") {
+      setAccountStatus("Google login unavailable. Add your Google OAuth Client ID first.", "error");
+      return;
+    }
+    if (window.google?.accounts?.id) window.google.accounts.id.prompt();
+    else setAccountStatus("Google login unavailable. Continue as guest.", "error");
+  });
+  ui.accountSignOut?.addEventListener("click", accountLogout);
   $("#resume").addEventListener("click", pauseGame);
   $("#restart").addEventListener("click", () => {
     ui.pause.classList.add("hidden");
@@ -7737,5 +8222,6 @@
   setTimeout(() => $("#boot").classList.add("done"), 1150);
   refreshCostumes();
   selectStage(selectedStage);
+  initAccountSystem();
   requestAnimationFrame(frame);
 })();
