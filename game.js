@@ -125,6 +125,9 @@
   let selectedCostume = "uniform";
   let selectedStage = "shinjuku";
   let selectedCharacter = "gojo";
+  let selectedDomainEnemy = "sukuna";
+  let selectedDomainPlayer = "gojo";
+  let offlineSelectionStep = "player";
   let pendingOfflineSelection = false;
   let onlineSelection = false;
   const GUEST_PROGRESS_KEY = "guestProgress";
@@ -189,6 +192,7 @@
     domainCharacter: "gojo",
     domainTick: .5,
     domainPrevious: 0,
+    domainUseTimer: 5,
     hakariDomain: null,
     trial: null,
     trialHover: -1,
@@ -876,6 +880,39 @@
     };
   }
 
+  function makeDomainUseEnemy(character = selectedDomainEnemy) {
+    const id = characters[character] ? character : "sukuna";
+    const profile = characters[id];
+    const fighter = makeRemotePlayer(2, profile.name, id, "normal");
+    fighter.kind = "enemy";
+    fighter.type = { name: profile.name, rank: "DOMAIN USE CPU", speed: id === "hakari" ? 322 : id === "sukuna" ? 316 : id === "higuruma" ? 306 : 300, boss: false };
+    fighter.health = 600;
+    fighter.maxHealth = 600;
+    fighter.lagHealth = 600;
+    fighter.energy = 100;
+    fighter.cooldowns = { blue: 0, red: 0, purple: 0, domain: 0, consecutive: 0 };
+    fighter.power = difficulty === "easy" ? .92 : difficulty === "hard" ? 1.14 : 1;
+    fighter.domainUse = true;
+    fighter.domainUseTimer = 5;
+    fighter.aiTimer = .35;
+    fighter.decision = "approach";
+    fighter.emergencyDodges = difficulty === "hard" ? 3 : 2;
+    fighter.adaptation = { light: 0, heavy: 0, special: 0, parryBaits: 0 };
+    if (id === "hakari") {
+      fighter.jackpot = 9999;
+      fighter.awakening = 9999;
+      fighter.heat = 100;
+      fighter.power *= 1.08;
+    }
+    if (id === "higuruma") {
+      fighter.awakening = 9999;
+      fighter.executionSword = 9999;
+      fighter.executionSwordUsed = false;
+      fighter.power *= 1.05;
+    }
+    return fighter;
+  }
+
   function resetProps() {
     const props = {
       shinjuku: [
@@ -912,6 +949,45 @@
     ui.selectAbilities.innerHTML = profile.abilities
       .map(([key, name]) => `<span><kbd>${key}</kbd> ${name}</span>`)
       .join("");
+    updateOfflineSelectionCopy();
+  }
+
+  function updateOfflineSelectionCopy() {
+    if (onlineSelection || !ui.characterSelect || ui.characterSelect.classList.contains("hidden")) return;
+    if (selectedMode !== "domainUse") {
+      ui.selectModeLabel.textContent = `${selectedMode.toUpperCase()} / SELECT YOUR FIGHTER`;
+      ui.selectionStatus.textContent = "SELECT A FIGHTER";
+      ui.confirmCharacter.textContent = "LOCK IN";
+      return;
+    }
+    if (offlineSelectionStep === "enemy") {
+      const playerProfile = characters[selectedDomainPlayer] || characters.gojo;
+      ui.selectModeLabel.textContent = "DOMAIN USE / SELECT THE ENEMY";
+      ui.selectionStatus.textContent = "CHOOSE WHO WILL SPAM DOMAINS EVERY 5 SECONDS";
+      ui.confirmCharacter.textContent = "LOCK ENEMY";
+      ui.characterBack.textContent = "BACK TO FIGHTER";
+      ui.selectionP1.querySelector("strong").textContent = playerProfile.name;
+      ui.selectionP1.querySelector("small").textContent = "LOCKED";
+      ui.selectionP1.dataset.character = selectedDomainPlayer;
+      ui.selectionP1.classList.add("locked");
+      ui.selectionP2.querySelector("strong").textContent = characters[selectedCharacter]?.name || "DOMAIN ENEMY";
+      ui.selectionP2.querySelector("small").textContent = "SELECTING ENEMY";
+      ui.selectionP2.dataset.character = selectedCharacter;
+      ui.selectionP2.classList.remove("locked");
+    } else {
+      ui.selectModeLabel.textContent = "DOMAIN USE / SELECT YOUR FIGHTER";
+      ui.selectionStatus.textContent = "LOCK YOUR FIGHTER, THEN PICK THE DOMAIN ENEMY";
+      ui.confirmCharacter.textContent = "LOCK FIGHTER";
+      ui.characterBack.textContent = "BACK";
+      ui.selectionP1.querySelector("strong").textContent = "PLAYER 1";
+      ui.selectionP1.querySelector("small").textContent = "NOT LOCKED";
+      ui.selectionP1.dataset.character = selectedCharacter;
+      ui.selectionP1.classList.remove("locked");
+      ui.selectionP2.querySelector("strong").textContent = "DOMAIN ENEMY";
+      ui.selectionP2.querySelector("small").textContent = "CHOOSE NEXT";
+      ui.selectionP2.dataset.character = selectedDomainEnemy;
+      ui.selectionP2.classList.remove("locked");
+    }
   }
 
   function bindCharacterCard(card) {
@@ -920,6 +996,9 @@
     card.addEventListener("click", () => {
       if (selectionLocked) return;
       selectedCharacter = card.dataset.character;
+      if (!onlineSelection && selectedMode === "domainUse" && offlineSelectionStep === "enemy") {
+        selectedDomainEnemy = selectedCharacter;
+      }
       renderCharacterSelection();
       if (onlineSelection) {
         window.dispatchEvent(new CustomEvent("voidlimit:characterPreview", { detail: { character: selectedCharacter } }));
@@ -950,6 +1029,7 @@
     ensureCharacterRoster();
     onlineSelection = Boolean(options.online);
     pendingOfflineSelection = !onlineSelection;
+    if (!onlineSelection) offlineSelectionStep = "player";
     selectionLocked = false;
     onlineLockRequest = null;
     selectedCharacter = options.character && characters[options.character] ? options.character : selectedCharacter;
@@ -1038,6 +1118,9 @@
   }
 
   function startOfflineSelection() {
+    offlineSelectionStep = "player";
+    selectedDomainPlayer = selectedCharacter;
+    if (!characters[selectedDomainEnemy]) selectedDomainEnemy = "sukuna";
     openCharacterSelect({ online: false, localName: "PLAYER 1", remoteName: "CURSED SPIRIT" });
   }
 
@@ -1059,7 +1142,27 @@
       }, 5000);
       return;
     }
+    if (selectedMode === "domainUse" && offlineSelectionStep === "player") {
+      selectedDomainPlayer = selectedCharacter;
+      offlineSelectionStep = "enemy";
+      selectedCharacter = selectedDomainEnemy;
+      selectionLocked = false;
+      ui.confirmCharacter.disabled = false;
+      ui.selectionP1.classList.add("locked");
+      ui.selectionP1.querySelector("strong").textContent = characters[selectedDomainPlayer].name;
+      ui.selectionP1.querySelector("small").textContent = "LOCKED";
+      $$(".character-card").forEach((card) => card.classList.remove("locked"));
+      renderCharacterSelection();
+      tone(320, .08, "square", .14, 160);
+      return;
+    }
     selectionLocked = true;
+    const remoteCharacter = selectedMode === "domainUse" ? selectedCharacter : "curse";
+    const remoteName = selectedMode === "domainUse" ? characters[remoteCharacter]?.name || "DOMAIN ENEMY" : "CURSED SPIRIT";
+    if (selectedMode === "domainUse") {
+      selectedDomainEnemy = remoteCharacter;
+      selectedCharacter = selectedDomainPlayer;
+    }
     ui.confirmCharacter.disabled = true;
     ui.confirmCharacter.textContent = "LOCKED";
     activeCard?.classList.add("locked");
@@ -1070,9 +1173,9 @@
     configureVersus({
       slot: 1,
       localCharacter: selectedCharacter,
-      remoteCharacter: "curse",
+      remoteCharacter,
       localName: characters[selectedCharacter].name,
-      remoteName: "CURSED SPIRIT",
+      remoteName,
     });
     ui.intro.classList.remove("hidden");
     ui.fightCountdown.textContent = "VS";
@@ -1098,7 +1201,7 @@
     game.player = makePlayer();
     game.wave = 1;
     game.enemies = [];
-    game.enemy = makeEnemy(selectedMode === "boss" ? 2 : 0);
+    game.enemy = selectedMode === "domainUse" ? makeDomainUseEnemy(selectedDomainEnemy) : makeEnemy(0);
     if (selectedMode === "survival") spawnSurvivalWave(1);
     game.particles.length = 0;
     game.projectiles.length = 0;
@@ -1135,6 +1238,7 @@
     game.hakariDomain = null;
     game.trial = null;
     game.domainTick = .5;
+    game.domainUseTimer = 5;
     game.jackpotFlash = 0;
     resetProps();
     ui.menu.classList.add("hidden");
@@ -1143,7 +1247,8 @@
     ui.pause.classList.add("hidden");
     ui.clash.classList.add("hidden");
     ui.hud.classList.remove("hidden");
-    announce(selectedMode === "training" ? "TRAINING START"
+    announce(selectedMode === "domainUse" ? `DOMAIN USE: ${characters[selectedDomainEnemy]?.name || "ENEMY"}`
+      : selectedMode === "training" ? "TRAINING START"
       : selectedCharacter === "sukuna" ? "THE KING ENTERS"
         : selectedCharacter === "hakari" ? "FEVER START"
           : selectedCharacter === "higuruma" ? "COURT IS IN SESSION" : "CURTAIN OPEN");
@@ -3406,13 +3511,12 @@
   }
 
   function localFrozenByUnlimitedVoid() {
+    const localSlot = game.online.active ? game.online.slot : 1;
     return Boolean(
-      game.online.active
-      && game.online.authoritative
-      && game.domain > 0
+      game.domain > 0
       && game.domainCharacter === "gojo"
       && game.domainOwnerSlot > 0
-      && game.domainOwnerSlot !== game.online.slot
+      && game.domainOwnerSlot !== localSlot
     );
   }
 
@@ -3436,6 +3540,31 @@
       p.charging = false;
       p.state = "voidFrozen";
       return;
+    }
+    const localSlot = game.online.active ? game.online.slot : 1;
+    const damagedByEnemySukunaDomain = game.domain > 0
+      && game.domainCharacter === "sukuna"
+      && game.domainOwnerSlot > 0
+      && game.domainOwnerSlot !== localSlot
+      && (!game.online.active || !game.online.authoritative);
+    if (damagedByEnemySukunaDomain) {
+      game.domainTick -= dt;
+      if (game.domainTick <= 0) {
+        game.domainTick += .5;
+        const slashDamage = p.blocking ? 7.5 : 15;
+        p.health = Math.max(0, p.health - slashDamage);
+        p.stun = Math.max(p.stun, .08);
+        p.reaction = "slash";
+        game.shake = Math.max(game.shake, 8);
+        for (let i = 0; i < 7; i++) {
+          game.particles.push({
+            x: p.x + rnd(-35, 35), y: p.y - rnd(18, p.h),
+            vx: rnd(-360, 360), vy: rnd(-280, 180), size: rnd(8, 18),
+            color: i % 2 ? "#ff244f" : "#fff1f3",
+            life: .24, maxLife: .24, gravity: 0, slash: true,
+          });
+        }
+      }
     }
     updateHakariState(dt);
     p.stateTime += dt;
@@ -3671,7 +3800,11 @@
       updateRemotePlayer(dt);
       return;
     }
-    if (game.domain > 0 && game.domainCharacter === "sukuna") {
+    const enemySlot = game.online.active ? (game.online.slot === 1 ? 2 : 1) : 2;
+    const damagedByPlayerSukunaDomain = game.domain > 0
+      && game.domainCharacter === "sukuna"
+      && game.domainOwnerSlot !== enemySlot;
+    if (damagedByPlayerSukunaDomain) {
       game.domainTick -= dt;
       if (game.domainTick <= 0) {
         game.domainTick += .5;
@@ -3691,7 +3824,10 @@
         }
       }
     }
-    if (game.domain > 0 && game.domainCharacter === "gojo") {
+    const frozenByPlayerGojoDomain = game.domain > 0
+      && game.domainCharacter === "gojo"
+      && game.domainOwnerSlot !== enemySlot;
+    if (frozenByPlayerGojoDomain) {
       e.vx = 0;
       e.vy = 0;
       e.attack = null;
@@ -4378,6 +4514,53 @@
     }
   }
 
+  function triggerEnemyDomainUse(enemy) {
+    if (!enemy || enemy.stun > 0 || enemy.health <= 0 || game.domain > 0 || game.domainStartup > 0 || game.trial || game.clash) return false;
+    if (enemy.character === "hakari" || enemy.character === "higuruma") return false;
+    game.domain = enemy.character === "sukuna" ? 15 : 12;
+    game.domainCharacter = enemy.character;
+    game.domainOwnerSlot = 2;
+    game.domainTick = .5;
+    game.windPaused = true;
+    game.glitch = Math.max(game.glitch, enemy.character === "sukuna" ? .35 : .55);
+    game.flash = Math.max(game.flash, .16);
+    game.shake = Math.max(game.shake, 12);
+    game.cameraTarget = Math.max(game.cameraTarget, 1.18);
+    game.cameraFocusX = (game.player.x + enemy.x) / 2;
+    game.cameraFocusY = GROUND - 110;
+    enemy.state = "domain";
+    enemy.stateTime = 0;
+    enemy.invuln = Math.max(enemy.invuln || 0, .45);
+    enemy.domainUseTimer = 5;
+    spawnParticles(W / 2, H / 2, enemy.character === "sukuna" ? "#ff254c" : "#9f8cff", 76, 520, 7, 1.2);
+    announce(enemy.character === "sukuna" ? "ENEMY MALEVOLENT SHRINE" : "ENEMY UNLIMITED VOID");
+    speakLine(enemy.character === "sukuna" ? "Open your eyes." : "Domain Expansion.");
+    tone(55, 1.1, "sine", .24, 220);
+    return true;
+  }
+
+  function updateDomainUseMode(dt) {
+    if (game.mode !== "domainUse" || !game.enemy || game.online.active) return;
+    const e = game.enemy;
+    e.energy = 100;
+    if (e.character === "hakari") {
+      e.jackpot = 9999;
+      e.awakening = 9999;
+      e.heat = 100;
+      if (game.jackpotFlash <= 0) game.jackpotFlash = .08;
+      return;
+    }
+    if (e.character === "higuruma") {
+      e.awakening = 9999;
+      e.executionSword = 9999;
+      e.executionSwordUsed = false;
+      return;
+    }
+    if (game.domain > 0 || game.domainStartup > 0 || game.trial || game.clash || e.stun > 0) return;
+    e.domainUseTimer = Math.max(0, Number(e.domainUseTimer || 5) - dt);
+    if (e.domainUseTimer <= 0 && !triggerEnemyDomainUse(e)) e.domainUseTimer = .25;
+  }
+
   function checkRound(dt) {
     if (game.mode !== "training" && game.domain <= 0 && game.domainStartup <= 0) game.time = Math.max(0, game.time - dt);
     const p = game.player;
@@ -4508,23 +4691,6 @@
       announce(`WAVE ${game.wave} - ${survivalEnemyLimit(game.wave)} CURSES`);
       return true;
     }
-    if (game.mode === "boss" && game.wave < 3) {
-      game.wave++;
-      game.enemy = makeEnemy(2);
-      game.enemy.maxHealth *= 1 + game.wave * .18;
-      game.enemy.health = game.enemy.maxHealth;
-      game.enemy.lagHealth = game.enemy.maxHealth;
-      game.enemy.power *= 1 + game.wave * .08;
-      game.player.health = Math.min(game.player.maxHealth, game.player.health + 12);
-      game.player.energy = Math.min(100, game.player.energy + 22);
-      game.unstablePurple = null;
-      game.time = 99;
-      game.outcomePending = false;
-      game.projectiles.length = 0;
-      resetProps();
-      announce(`BOSS ${game.wave} / 3`);
-      return true;
-    }
     return false;
   }
 
@@ -4539,7 +4705,7 @@
         ? `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds fought | No winner`
         : `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds survived | ${game.online.remoteName}`
       : won
-        ? game.mode === "story" ? "The curtain falls. The strongest remains." : "Another impossible record."
+        ? game.mode === "story" ? "The curtain falls. The strongest remains." : game.mode === "domainUse" ? "You survived the domain pressure." : "Another impossible record."
         : "Power means nothing without timing.";
     const labels = [...ui.result.querySelectorAll(".stats span")];
     if (game.mode === "online") {
@@ -4569,7 +4735,7 @@
       $("#leaveOnlineResult").classList.add("hidden");
     }
     if (won && game.mode === "story") unlockCostume("snowfall");
-    if (won && game.mode === "boss") unlockCostume("eclipse");
+    if (won && game.mode === "domainUse") unlockCostume("eclipse");
     recordMatchProgress(won, draw);
     if (won && game.player.character === "sukuna") speakLine("You never stood a chance.");
     tone(won ? 330 : 90, .8, won ? "sine" : "sawtooth", .25, won ? 550 : -40);
@@ -4961,7 +5127,7 @@
     delta.stats.totalWins = won && !draw ? 1 : 0;
     delta.stats.totalLosses = !won && !draw ? 1 : 0;
     delta.stats.bestSurvivalWave = game.mode === "survival" ? game.wave : 0;
-    delta.stats.bossRushClears = won && game.mode === "boss" ? 1 : 0;
+    delta.stats.bossRushClears = won && game.mode === "domainUse" ? 1 : 0;
     delta.stats.maxCombo = game.maxCombo || 0;
     delta.stats.blackFlashes = stats.blackFlashes || 0;
     delta.stats.domainsUsed = stats.domains || 0;
@@ -5119,7 +5285,7 @@
     if (!p || !e) return;
     const survivalLiving = activeSurvivalEnemies();
     const profile = characterProfile(p);
-    const enemyProfile = game.online.active ? characterProfile(e) : null;
+    const enemyProfile = game.online.active || game.mode === "domainUse" ? characterProfile(e) : null;
     ui.playerHealth.style.transform = `scaleX(${clamp(p.health / p.maxHealth, 0, 1)})`;
     ui.playerLag.style.transform = `scaleX(${clamp(p.lagHealth / p.maxHealth, 0, 1)})`;
     ui.playerEnergy.style.transform = `scaleX(${p.energy / 100})`;
@@ -5133,14 +5299,18 @@
     ui.playerPortrait.querySelector("span").textContent = playerMark;
     ui.enemyName.textContent = isSurvivalMode()
       ? `SURVIVAL CURSES ${survivalLiving.length}/${survivalEnemyLimit(game.wave)}`
+      : game.mode === "domainUse"
+        ? `${enemyProfile.name}  ${Math.ceil(e.health)} HP`
       : `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
     ui.enemyState.textContent = game.online.active
       ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}${e.burned ? " / BURNED" : ""}`
+      : game.mode === "domainUse"
+        ? `${e.character === "hakari" ? "PERMANENT JACKPOT" : e.character === "higuruma" ? "AWAKENED JUDGMENT" : `DOMAIN IN ${Math.max(0, e.domainUseTimer || 0).toFixed(1)}s`}`
       : isSurvivalMode() ? `${e.type.rank} TARGET / PUNCH + BARRAGE` : e.type.rank;
     const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : e.character === "higuruma" ? "higuruma-portrait" : "gojo-portrait";
     const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : e.character === "higuruma" ? "HG" : "VI";
-    ui.enemyPortrait.className = `portrait ${game.online.active ? enemyPortrait : "curse-portrait"}`;
-    ui.enemyPortrait.querySelector("span").textContent = game.online.active ? enemyMark : "CR";
+    ui.enemyPortrait.className = `portrait ${game.online.active || game.mode === "domainUse" ? enemyPortrait : "curse-portrait"}`;
+    ui.enemyPortrait.querySelector("span").textContent = game.online.active || game.mode === "domainUse" ? enemyMark : "CR";
     const normalPlayerState = game.online.active
       ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.burned ? " / BURNED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
       : p.awakening > 0
@@ -5160,8 +5330,9 @@
         ? `CHARGE RECOVERY ${p.chargeRecovery.toFixed(1)}s`
         : p.chargeCooldown > 0 ? `CHARGE COOLDOWN ${p.chargeCooldown.toFixed(1)}s` : normalPlayerState;
     ui.timer.textContent = game.mode === "training" ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
-    ui.mode.textContent = game.mode.toUpperCase();
+    ui.mode.textContent = game.mode === "domainUse" ? "DOMAIN USE" : game.mode.toUpperCase();
     ui.wave.textContent = game.online.active ? `P${game.online.slot} / ${Math.max(0, Math.round(game.online.startAt - Date.now())) > 0 ? "SYNC" : "LIVE"}`
+      : game.mode === "domainUse" ? `DOMAIN ENEMY`
       : game.mode === "survival" ? `WAVE ${game.wave} / CAP ${survivalEnemyLimit(game.wave)}` : game.mode === "training" ? "FRAME LAB" : `ENCOUNTER ${game.wave}`;
     ui.stageLabel.textContent = `${stages[selectedStage].name} / ${stages[selectedStage].subtitle}`;
     ui.combo.querySelector("strong").textContent = p.comboHits;
@@ -5307,6 +5478,7 @@
       }
     }
     const scaledDt = dt * (game.slow > 0 ? .22 : 1);
+    updateDomainUseMode(scaledDt);
     updatePlayer(scaledDt);
     updateEnemy(scaledDt);
     updateProjectiles(scaledDt);
@@ -7134,7 +7306,7 @@
       if (isSurvivalMode()) {
         for (const enemy of activeSurvivalEnemies()) drawCurse(enemy);
       } else if (game.enemy) {
-        if (game.online.active && game.enemy.kind === "remote") drawFighter(game.enemy);
+        if ((game.online.active && game.enemy.kind === "remote") || game.enemy.character) drawFighter(game.enemy);
         else drawCurse(game.enemy);
       }
       drawParticles();
@@ -8429,6 +8601,15 @@
     if (onlineSelection) {
       window.dispatchEvent(new CustomEvent("voidlimit:leaveOnline"));
       ui.characterSelect.classList.add("hidden");
+      return;
+    }
+    if (selectedMode === "domainUse" && offlineSelectionStep === "enemy") {
+      offlineSelectionStep = "player";
+      selectedCharacter = selectedDomainPlayer;
+      selectionLocked = false;
+      ui.confirmCharacter.disabled = false;
+      $$(".character-card").forEach((card) => card.classList.remove("locked"));
+      renderCharacterSelection();
       return;
     }
     ui.characterSelect.classList.add("hidden");
