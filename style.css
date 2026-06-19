@@ -486,8 +486,17 @@ canvas {
 .google-login-wrap {
   display: grid;
   place-items: center;
+  gap: 8px;
   min-height: 42px;
 }
+.google-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  place-items: center;
+}
+.google-login-wrap.google-ready .google-fallback,
 .google-login-wrap:has(#googleButtonMount:not(:empty)) .google-fallback { display: none; }
 .google-fallback {
   width: 100%;
@@ -495,6 +504,26 @@ canvas {
   color: #fff8d7 !important;
   background: #20170c !important;
 }
+.google-fallback.alt {
+  border-color: #55e7ff80 !important;
+  color: #eafaff !important;
+  background: #07162d !important;
+}
+.server-login-link {
+  display: block;
+  margin: 0 auto 14px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 9px 12px;
+  color: #8dffcf;
+  border: 1px solid #8dffcf66;
+  background: #071b18d9;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-decoration: none;
+}
+.server-login-link.hidden { display: none; }
 .account-save {
   padding: 12px;
   border: 1px solid #ffd36d33;
