@@ -80,7 +80,10 @@
     accountBack: $("#accountBack"),
     guestModeButton: $("#guestModeButton"),
     googleFallbackButton: $("#googleFallbackButton"),
+    googleSignUpButton: $("#googleSignUpButton"),
     googleButtonMount: $("#googleButtonMount"),
+    googleSignUpMount: $("#googleSignUpMount"),
+    serverLoginLink: $("#serverLoginLink"),
     accountAvatar: $("#accountAvatar"),
     accountName: $("#accountName"),
     accountEmail: $("#accountEmail"),
@@ -4621,6 +4624,7 @@
     setAccountAvatar(ui.accountAvatar, signed ? profile.picture : "");
     setAccountAvatar(ui.menuAccountAvatar, signed ? profile.picture : "");
     ui.accountSignOut?.classList.toggle("hidden", !signed);
+    ui.serverLoginLink?.classList.toggle("hidden", SERVER_ACCOUNTS_AVAILABLE);
     const values = [
       progress.stats.totalWins,
       progress.stats.bestSurvivalWave,
@@ -4775,7 +4779,7 @@
     ui.accountPanel.classList.remove("hidden");
     updateAccountUi();
     if (!SERVER_ACCOUNTS_AVAILABLE) {
-      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
+      setAccountStatus("Run start-online.bat, then open http://localhost:4173 to sign in or sign up. Guest Mode works here.", "error");
     } else if (!googleClientId) {
       setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
     }
@@ -4789,7 +4793,7 @@
   async function loadAccountConfig() {
     if (!SERVER_ACCOUNTS_AVAILABLE) {
       googleClientId = "";
-      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
+      setAccountStatus("Run start-online.bat, then open http://localhost:4173 to sign in or sign up. Guest Mode works here.", "error");
       return "";
     }
     try {
@@ -4818,9 +4822,28 @@
     return googleScriptPromise;
   }
 
+  async function beginGoogleAuth(mode = "signin") {
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      setAccountStatus("Google login requires running start-online.bat, then opening http://localhost:4173. Guest Mode is still available.", "error");
+      return;
+    }
+    if (!googleClientId) {
+      setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
+      return;
+    }
+    setAccountStatus(mode === "signup" ? "Opening Google sign up..." : "Opening Google sign in...");
+    try {
+      await initGoogleLogin();
+      if (window.google?.accounts?.id) window.google.accounts.id.prompt();
+      else setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
+    } catch {
+      setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
+    }
+  }
+
   async function initGoogleLogin() {
     if (!SERVER_ACCOUNTS_AVAILABLE) {
-      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
+      setAccountStatus("Run start-online.bat, then open http://localhost:4173 to sign in or sign up. Guest Mode works here.", "error");
       return;
     }
     if (!googleClientId) {
@@ -4842,8 +4865,19 @@
           shape: "rectangular",
           width: 240,
         });
-        ui.googleFallbackButton?.classList.add("hidden");
       }
+      if (ui.googleSignUpMount && !ui.googleSignUpMount.childElementCount) {
+        window.google.accounts.id.renderButton(ui.googleSignUpMount, {
+          theme: "filled_black",
+          size: "large",
+          text: "signup_with",
+          shape: "rectangular",
+          width: 240,
+        });
+      }
+      ui.googleButtonMount?.parentElement?.parentElement?.classList.add("google-ready");
+      ui.googleFallbackButton?.classList.add("hidden");
+      ui.googleSignUpButton?.classList.add("hidden");
     } catch {
       setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
     }
@@ -8208,20 +8242,8 @@
     updateAccountUi();
     closeAccountPanel();
   });
-  ui.googleFallbackButton?.addEventListener("click", () => {
-    if (!SERVER_ACCOUNTS_AVAILABLE) {
-      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
-      return;
-    }
-    if (!googleClientId) {
-      setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
-      return;
-    }
-    loadGoogleIdentityScript().then(() => {
-      if (window.google?.accounts?.id) window.google.accounts.id.prompt();
-      else setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
-    }).catch(() => setAccountStatus("Google login unavailable. Guest Mode is still available.", "error"));
-  });
+  ui.googleFallbackButton?.addEventListener("click", () => beginGoogleAuth("signin"));
+  ui.googleSignUpButton?.addEventListener("click", () => beginGoogleAuth("signup"));
   ui.accountSignOut?.addEventListener("click", accountLogout);
   $("#resume").addEventListener("click", pauseGame);
   $("#restart").addEventListener("click", () => {
