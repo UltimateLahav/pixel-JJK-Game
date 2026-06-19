@@ -94,11 +94,16 @@
         <div class="account-actions">
           <button id="guestModeButton">CONTINUE AS GUEST</button>
           <div class="google-login-wrap">
-            <div id="googleButtonMount"></div>
+            <div class="google-buttons">
+              <div id="googleButtonMount"></div>
+              <div id="googleSignUpMount"></div>
+            </div>
             <button id="googleFallbackButton" class="google-fallback">SIGN IN WITH GOOGLE</button>
+            <button id="googleSignUpButton" class="google-fallback alt">SIGN UP WITH GOOGLE</button>
           </div>
           <button id="accountSignOut" class="danger hidden">SIGN OUT</button>
         </div>
+        <a id="serverLoginLink" class="server-login-link" href="http://localhost:4173">OPEN SERVER VERSION FOR GOOGLE LOGIN</a>
         <div class="account-save">
           <div class="section-title">SAVED STATS PREVIEW</div>
           <div id="accountStats" class="account-stats">
@@ -108,7 +113,7 @@
             <span>DOMAINS <b>0</b></span>
           </div>
         </div>
-        <p class="account-note">Google login only runs from the local server URL. Guest saves stay on this device.</p>
+        <p class="account-note">Google login only runs from http://localhost:4173 after start-online.bat is running. Guest saves stay on this device.</p>
       </div>
     </section>
 
@@ -375,7 +380,7 @@
       <i></i>
     </div>
   </main>
-  <script src="game.js?v=20260619-google-config"></script>
-  <script src="online.js?v=20260619-google-config"></script>
+  <script src="game.js?v=20260619-signin-signup"></script>
+  <script src="online.js?v=20260619-signin-signup"></script>
 </body>
 </html>
