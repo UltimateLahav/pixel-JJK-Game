@@ -295,7 +295,331 @@ canvas {
   box-shadow: 0 0 24px #55e7ff25 !important;
 }
 .online-entry i { float: right; color: var(--cyan); font-style: normal; }
+.account-entry {
+  min-width: 270px;
+  margin-top: 8px !important;
+  color: #fff8d7 !important;
+  border: 1px solid #ffd36d !important;
+  border-left: 5px solid #ffd36d !important;
+  background: #19120be8 !important;
+  box-shadow: 0 0 24px #ffd36d22 !important;
+}
+.account-entry i { float: right; color: #ffd36d; font-style: normal; }
+.settings-entry {
+  min-width: 270px;
+  margin-top: 8px !important;
+  color: #eaffff !important;
+  border: 1px solid #8dffcf !important;
+  border-left: 5px solid #8dffcf !important;
+  background: #071b18e8 !important;
+  box-shadow: 0 0 24px #55ffb822 !important;
+}
+.settings-entry i { float: right; color: #8dffcf; font-style: normal; }
+.menu-account {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 270px;
+  margin: -2px 0 12px;
+  padding: 8px 12px;
+  border: 1px solid #55e7ff3d;
+  background: #050b19c9;
+  box-shadow: inset 0 0 20px #55e7ff0f;
+}
+.menu-account.signed { border-color: #ffd36d99; box-shadow: 0 0 22px #ffd36d20; }
+.menu-account-avatar, .account-avatar {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #55e7ff8a;
+  background: linear-gradient(135deg, #101a33, #050814);
+}
+.menu-account-avatar {
+  width: 34px;
+  height: 34px;
+}
+.menu-account-avatar img, .account-avatar img {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.menu-account-avatar::before, .account-avatar::before {
+  content: "VL";
+  color: #55e7ff;
+  font: 700 10px Consolas, monospace;
+  letter-spacing: 1px;
+}
+.menu-account-avatar.has-image::before, .account-avatar.has-image::before { display: none; }
+.menu-account-avatar.has-image img, .account-avatar.has-image img { display: block; }
+.menu-account span {
+  display: block;
+  color: #7e8ba8;
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+.menu-account strong {
+  display: block;
+  margin-top: 3px;
+  color: white;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
 .menu-note { color: #55617a; font-size: 9px; letter-spacing: 1px; }
+
+.account-panel {
+  position: absolute;
+  z-index: 16;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 34px;
+  background:
+    radial-gradient(circle at 25% 25%, #33220e70, transparent 32%),
+    linear-gradient(90deg, #030611f6, #07132df0),
+    var(--stage-bg, url("assets/stage-shinjuku.png")) center/cover;
+}
+.account-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 89px, #ffd36d0b 90px),
+    linear-gradient(120deg, transparent 0 49.8%, #ffd36d25 50%, transparent 50.2%);
+}
+.account-card {
+  position: relative;
+  z-index: 1;
+  width: min(680px, 82vw);
+  padding: 34px;
+  border: 1px solid #ffd36d80;
+  background: linear-gradient(145deg, #0b1020f5, #070713f8);
+  box-shadow: 0 20px 70px #000c, inset 0 0 35px #ffd36d12;
+  clip-path: polygon(0 0, 96% 0, 100% 8%, 100% 100%, 4% 100%, 0 92%);
+}
+.account-card h2 {
+  margin: 18px 0 18px;
+  color: white;
+  font: 38px Consolas, monospace;
+  letter-spacing: -1px;
+  text-align: center;
+  text-shadow: 4px 4px #5b3510;
+}
+.account-status {
+  min-height: 22px;
+  margin-bottom: 14px;
+  color: #ffd36d;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.account-status.error { color: #ff6d8e; }
+.account-status.ok { color: #87f7ff; }
+.account-profile {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid #55e7ff33;
+  background: #050b18d4;
+}
+.account-avatar {
+  width: 76px;
+  height: 76px;
+  border-color: #ffd36d8f;
+}
+.account-avatar::before { color: #ffd36d; font-size: 16px; }
+.account-mode {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 4px 7px;
+  border: 1px solid #55e7ff66;
+  color: #55e7ff;
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+.account-mode.signed {
+  border-color: #ffd36d99;
+  color: #ffd36d;
+}
+.account-profile strong {
+  display: block;
+  color: white;
+  font-size: 20px;
+  letter-spacing: 1px;
+}
+.account-profile small {
+  display: block;
+  margin-top: 5px;
+  color: #7d8cab;
+  font-size: 11px;
+  word-break: break-word;
+}
+.account-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0;
+}
+.account-actions button, .google-login-wrap > div {
+  min-height: 42px;
+}
+.account-actions button {
+  padding: 11px 14px;
+  border: 1px solid #55e7ff80;
+  color: #eafaff;
+  background: #09152c;
+  font-weight: 800;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.account-actions button:hover { filter: brightness(1.15); }
+.account-actions .danger {
+  border-color: #ff6d8e;
+  color: #ffe8ee;
+  background: #2a0714;
+}
+.google-login-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+}
+.google-login-wrap:has(#googleButtonMount:not(:empty)) .google-fallback { display: none; }
+.google-fallback {
+  width: 100%;
+  border-color: #ffd36d80 !important;
+  color: #fff8d7 !important;
+  background: #20170c !important;
+}
+.account-save {
+  padding: 12px;
+  border: 1px solid #ffd36d33;
+  background: #080b14d5;
+}
+.account-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.account-stats span {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  color: #7f8da8;
+  border: 1px solid #34415c;
+  background: #050914;
+  font-size: 8px;
+  letter-spacing: 1px;
+}
+.account-stats b {
+  color: white;
+  font-size: 16px;
+}
+.account-note {
+  margin: 14px 0 0;
+  color: #70809b;
+  font-size: 10px;
+  letter-spacing: .8px;
+  text-align: center;
+}
+
+.settings-panel {
+  position: absolute;
+  z-index: 16;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 34px;
+  background:
+    radial-gradient(circle at 32% 22%, #0f463470, transparent 33%),
+    linear-gradient(90deg, #030611f6, #07132df0),
+    var(--stage-bg, url("assets/stage-shinjuku.png")) center/cover;
+}
+.settings-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 89px, #8dffcf0b 90px),
+    linear-gradient(120deg, transparent 0 49.8%, #8dffcf24 50%, transparent 50.2%);
+}
+.settings-card {
+  position: relative;
+  z-index: 1;
+  width: min(620px, 80vw);
+  padding: 34px;
+  border: 1px solid #8dffcf80;
+  background: linear-gradient(145deg, #081323f5, #070713f8);
+  box-shadow: 0 20px 70px #000c, inset 0 0 35px #55ffb812;
+  clip-path: polygon(0 0, 96% 0, 100% 8%, 100% 100%, 4% 100%, 0 92%);
+}
+.settings-card h2 {
+  margin: 18px 0 26px;
+  color: white;
+  font: 38px Consolas, monospace;
+  letter-spacing: -1px;
+  text-align: center;
+  text-shadow: 4px 4px #0d4b41;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #55e7ff33;
+  background: #050b18d4;
+}
+.settings-row strong {
+  display: block;
+  color: white;
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+.settings-row small {
+  display: block;
+  margin-top: 5px;
+  color: #7d8cab;
+  font-size: 10px;
+  letter-spacing: .8px;
+}
+.settings-row b {
+  color: #8dffcf;
+  font: 22px Consolas, monospace;
+  text-shadow: 0 0 14px #55ffb866;
+}
+.volume-slider {
+  width: 100%;
+  margin: 22px 0 14px;
+  accent-color: #8dffcf;
+}
+.settings-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+.settings-actions button {
+  min-width: 220px;
+  padding: 11px 14px;
+  color: #eaffff;
+  border: 1px solid #8dffcf80;
+  background: #071b18;
+  font-weight: 800;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.settings-note {
+  margin: 16px 0 0;
+  color: #70809b;
+  font-size: 10px;
+  letter-spacing: .8px;
+  text-align: center;
+}
 
 .online-panel {
   position: absolute;
@@ -1302,6 +1626,16 @@ kbd {
 .pause > button:first-of-type, .result > button:first-of-type { background: var(--cyan); color: #04101a; border-color: white; }
 .result h2 { font-size: 56px; color: var(--cyan); }
 .result > p { z-index: 1; color: #9aa9c4; letter-spacing: 2px; }
+.result-account {
+  z-index: 1;
+  margin-top: 6px;
+  padding: 6px 10px;
+  color: #ffd36d;
+  border: 1px solid #ffd36d55;
+  background: #080b15d9;
+  font-size: 9px;
+  letter-spacing: 2px;
+}
 .stats { z-index: 1; display: flex; gap: 8px; margin: 12px 0; }
 .stats div { width: 145px; padding: 12px; border: 1px solid #293550; background: #080c18; text-align: center; }
 .stats span { display: block; color: #667590; font-size: 8px; letter-spacing: 1px; }
@@ -1343,19 +1677,25 @@ kbd {
 }
 
 @media (max-width: 980px), (max-height: 660px) {
-  .online-panel {
+  .online-panel,
+  .account-panel,
+  .settings-panel {
     place-items: start center;
     overflow-y: auto;
     padding: 16px;
   }
   .online-card,
-  .lobby-card {
+  .lobby-card,
+  .account-card,
+  .settings-card {
     width: min(960px, calc(100vw - 28px));
     max-height: none;
     padding: 18px;
     clip-path: none;
   }
-  .online-card h2 {
+  .online-card h2,
+  .account-card h2,
+  .settings-card h2 {
     margin: 8px 0 18px;
     font-size: clamp(24px, 8vw, 38px);
     letter-spacing: -1px;
@@ -1364,6 +1704,10 @@ kbd {
   .join-box,
   .lobby-buttons {
     flex-wrap: wrap;
+  }
+  .account-actions,
+  .account-stats {
+    grid-template-columns: 1fr 1fr;
   }
   .join-box input,
   .join-box button,
@@ -1444,13 +1788,27 @@ kbd {
 }
 
 @media (max-width: 560px) {
-  .online-panel {
+  .online-panel,
+  .account-panel,
+  .settings-panel {
     padding: 10px;
   }
   .online-card,
-  .lobby-card {
+  .lobby-card,
+  .account-card,
+  .settings-card {
     width: calc(100vw - 16px);
     padding: 12px;
+  }
+  .account-profile,
+  .account-actions,
+  .account-stats,
+  .settings-row {
+    grid-template-columns: 1fr;
+  }
+  .account-avatar {
+    width: 62px;
+    height: 62px;
   }
   .online-maps {
     grid-template-columns: 1fr;
