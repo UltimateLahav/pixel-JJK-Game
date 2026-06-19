@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070913">
   <title>Void Limit</title>
-  <link rel="stylesheet" href="style.css?v=20260616-courtroom-polish">
+  <link rel="stylesheet" href="style.css?v=20260618-account">
 </head>
 <body>
   <main id="shell">
@@ -16,6 +16,13 @@
       <h1>VOID<br><b>LIMIT</b></h1>
       <p class="tagline">Master the space between timing and impact.</p>
       <p class="build-stamp">BUILD: ONLINE FAIRNESS + MOBILE FIX</p>
+      <div id="menuAccount" class="menu-account guest">
+        <div class="menu-account-avatar"><img id="menuAccountAvatar" alt="" src=""></div>
+        <div>
+          <span id="menuAccountMode">GUEST MODE</span>
+          <strong id="menuAccountName">Guest Fighter</strong>
+        </div>
+      </div>
       <div class="mode-grid">
         <button class="mode active" data-mode="story"><small>01</small><strong>STORY</strong><em>3 encounters</em></button>
         <button class="mode" data-mode="survival"><small>02</small><strong>SURVIVAL</strong><em>Endless curses</em></button>
@@ -45,7 +52,64 @@
       </div>
       <button id="start">ENTER THE BARRIER <i>ENTER</i></button>
       <button id="onlineBattle" class="online-entry">ONLINE BATTLE <i>2P</i></button>
+      <button id="accountButton" class="account-entry">ACCOUNT <i id="accountButtonMode">GUEST</i></button>
+      <button id="settingsButton" class="settings-entry">SETTINGS <i>AUDIO</i></button>
       <p class="menu-note">Keyboard recommended | Audio generated in real time</p>
+    </section>
+
+    <section id="settingsPanel" class="settings-panel hidden" aria-label="Void Limit settings panel">
+      <button id="settingsBack" class="online-back">BACK</button>
+      <div class="settings-card">
+        <div class="eyebrow"><span></span> BARRIER SETTINGS <span></span></div>
+        <h2>SETTINGS</h2>
+        <div class="settings-row">
+          <div>
+            <strong>MUSIC VOLUME</strong>
+            <small>Controls Hakari Jackpot music.</small>
+          </div>
+          <b id="musicVolumeValue">58%</b>
+        </div>
+        <input id="musicVolume" class="volume-slider" type="range" min="0" max="100" value="58" step="1" aria-label="Music volume">
+        <div class="settings-actions">
+          <button id="resetSettings">RESET AUDIO</button>
+        </div>
+        <p class="settings-note">This saves on this browser and applies instantly.</p>
+      </div>
+    </section>
+
+    <section id="accountPanel" class="account-panel hidden" aria-label="Void Limit account panel">
+      <button id="accountBack" class="online-back">BACK</button>
+      <div class="account-card">
+        <div class="eyebrow"><span></span> ACCOUNT LINK <span></span></div>
+        <h2>VOID LIMIT ACCOUNT</h2>
+        <div id="accountStatus" class="account-status">Guest mode is active.</div>
+        <div class="account-profile">
+          <div class="account-avatar"><img id="accountAvatar" alt="" src=""></div>
+          <div>
+            <span id="accountMode" class="account-mode guest">GUEST MODE</span>
+            <strong id="accountName">Guest Fighter</strong>
+            <small id="accountEmail">Offline progress stays on this browser.</small>
+          </div>
+        </div>
+        <div class="account-actions">
+          <button id="guestModeButton">CONTINUE AS GUEST</button>
+          <div class="google-login-wrap">
+            <div id="googleButtonMount"></div>
+            <button id="googleFallbackButton" class="google-fallback">SIGN IN WITH GOOGLE</button>
+          </div>
+          <button id="accountSignOut" class="danger hidden">SIGN OUT</button>
+        </div>
+        <div class="account-save">
+          <div class="section-title">SAVED STATS PREVIEW</div>
+          <div id="accountStats" class="account-stats">
+            <span>WINS <b>0</b></span>
+            <span>BEST WAVE <b>0</b></span>
+            <span>MAX COMBO <b>0</b></span>
+            <span>DOMAINS <b>0</b></span>
+          </div>
+        </div>
+        <p class="account-note">Google login only runs from the local server URL. Guest saves stay on this device.</p>
+      </div>
     </section>
 
     <section id="onlineMenu" class="online-panel hidden">
@@ -293,6 +357,7 @@
       <div class="eyebrow"><span></span> BATTLE REPORT <span></span></div>
       <h2 id="resultTitle">VICTORY</h2>
       <p id="resultSub">The honored one remains standing.</p>
+      <div id="resultAccount" class="result-account">GUEST MODE</div>
       <div class="stats">
         <div><span>SCORE</span><strong id="scoreStat">000000</strong></div>
         <div><span>MAX COMBO</span><strong id="comboStat">00</strong></div>
@@ -310,7 +375,8 @@
       <i></i>
     </div>
   </main>
-  <script src="game.js?v=20260618-judgeman-domain"></script>
-  <script src="online.js?v=20260618-judgeman-domain"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="game.js?v=20260619-settings"></script>
+  <script src="online.js?v=20260619-settings"></script>
 </body>
 </html>
