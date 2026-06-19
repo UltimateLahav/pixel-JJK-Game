@@ -2,6 +2,9 @@
 setlocal
 title Void Limit Online Server
 
+REM Your Google OAuth WEB Client ID. This is not a Client Secret.
+set "GOOGLE_CLIENT_ID=985537852640-mj77hcjhvvpj0at4bmthoek3afbk88og.apps.googleusercontent.com"
+
 where node >nul 2>nul
 if not errorlevel 1 set "NODE=node"
 
@@ -15,32 +18,19 @@ if /i not "%NODE%"=="node" if not exist "%NODE%" (
 )
 
 echo.
-echo Google Sign-In setup:
-echo Paste your Google OAuth WEB CLIENT ID.
-echo It should end with: .apps.googleusercontent.com
-echo Leave blank only if you want Guest Mode only.
+echo Void Limit Online Server
+echo ------------------------
+echo Google Sign-In Client ID loaded:
+echo %GOOGLE_CLIENT_ID%
 echo.
-
-set "GOOGLE_CLIENT_ID="
-set /p "GOOGLE_CLIENT_ID=Google OAuth Web Client ID: "
-
-echo.
-if "%GOOGLE_CLIENT_ID%"=="" (
-  echo Starting without Google Sign-In. Guest Mode will still work.
-) else (
-  echo Google Sign-In Client ID loaded:
-  echo %GOOGLE_CLIENT_ID%
-)
-
-echo.
-echo Starting server...
-echo Open this in your browser:
+echo Opening game at:
 echo http://localhost:4173
 echo.
-echo Test config here:
+echo To test the config, open:
 echo http://localhost:4173/api/config
 echo.
 
+start "" "http://localhost:4173"
 "%NODE%" "%~dp0server.js"
 
 pause
