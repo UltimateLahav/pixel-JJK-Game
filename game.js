@@ -84,6 +84,7 @@
     googleButtonMount: $("#googleButtonMount"),
     googleSignUpMount: $("#googleSignUpMount"),
     serverLoginLink: $("#serverLoginLink"),
+    googleOriginHelp: $("#googleOriginHelp"),
     accountAvatar: $("#accountAvatar"),
     accountName: $("#accountName"),
     accountEmail: $("#accountEmail"),
@@ -148,6 +149,7 @@
     state: "menu",
     player: null,
     enemy: null,
+    enemies: [],
     particles: [],
     projectiles: [],
     afterimages: [],
@@ -296,6 +298,11 @@
     { name: "DREAD WRAITH", rank: "GRADE 1", color: "#ae3867", accent: "#ff6b9a", hp: 115, speed: 155, power: 1 },
     { name: "RIFT STALKER", rank: "SPECIAL GRADE", color: "#5a36a5", accent: "#b07cff", hp: 145, speed: 185, power: 1.16 },
     { name: "ABYSS SOVEREIGN", rank: "DOMAIN USER", color: "#8e2445", accent: "#ff455f", hp: 190, speed: 170, power: 1.34, boss: true },
+  ];
+
+  const survivalCurseTypes = [
+    { name: "LOW CURSE", rank: "GRADE 2", color: "#6f4d90", accent: "#b493ff", hp: 82, speed: 138, power: .82, aiLevel: .85, barrageChance: .24 },
+    { name: "FIERCE CURSE", rank: "GRADE 1", color: "#ae3867", accent: "#ff6b9a", hp: 112, speed: 168, power: 1.06, aiLevel: 1.14, barrageChance: .46 },
   ];
 
   const trialCrimes = {
@@ -766,6 +773,88 @@
     };
   }
 
+  function isSurvivalMode() {
+    return game.mode === "survival" && !game.online.active;
+  }
+
+  function survivalEnemyLimit(wave = game.wave) {
+    return Math.min(6, 3 + Math.floor(Math.max(0, wave - 1) / 5));
+  }
+
+  function activeSurvivalEnemies() {
+    if (!isSurvivalMode()) return [];
+    return game.enemies.filter((enemy) => enemy && enemy.health > 0);
+  }
+
+  function retargetSurvivalEnemy() {
+    if (!isSurvivalMode() || !game.player) return game.enemy;
+    const living = activeSurvivalEnemies();
+    if (!living.length) {
+      game.enemy = null;
+      return null;
+    }
+    living.sort((a, b) => Math.abs(a.x - game.player.x) - Math.abs(b.x - game.player.x));
+    game.enemy = living[0];
+    return game.enemy;
+  }
+
+  function makeSurvivalEnemy(slot = 0, total = 3) {
+    const diff = difficulty === "easy" ? 0.86 : difficulty === "hard" ? 1.18 : 1;
+    const gradeOneChance = clamp(.25 + game.wave * .025, .25, .72);
+    const type = survivalCurseTypes[chance(gradeOneChance) ? 1 : 0];
+    const waveScale = 1 + Math.max(0, game.wave - 1) * .035;
+    const side = slot % 2 === 0 ? -1 : 1;
+    const row = Math.floor(slot / 2);
+    const x = side < 0 ? 58 + row * 42 : W - 58 - row * 42;
+    return {
+      kind: "enemy",
+      survivalCurse: true,
+      aiGrade: type.rank,
+      type,
+      x, y: GROUND, w: 48, h: 91,
+      vx: 0, vy: 0, facing: side < 0 ? 1 : -1,
+      health: Math.round(type.hp * diff * waveScale), maxHealth: Math.round(type.hp * diff * waveScale), lagHealth: Math.round(type.hp * diff * waveScale),
+      energy: 0,
+      grounded: true, state: "idle", stateTime: 0, attack: null,
+      stun: 0, invuln: 0, aiTimer: rnd(.18, .5) + slot * .05, decision: "approach",
+      power: type.power * diff, flash: 0, domainUsed: false,
+      moveConfiscation: 0, executionSword: 0, executionSwordUsed: false, executionRecovery: 0,
+      reaction: "idle", wallSplat: 0, emergencyDodges: type.rank === "GRADE 1" ? 1 : 0,
+      adaptation: { light: 0, heavy: 0, special: 0, parryBaits: 0 },
+      baiting: 0, lastPlayerStrategy: "",
+      spawnSlot: slot, waveSpawnTotal: total,
+    };
+  }
+
+  function spawnSurvivalWave(wave = game.wave) {
+    const limit = survivalEnemyLimit(wave);
+    game.enemies = Array.from({ length: limit }, (_, index) => makeSurvivalEnemy(index, limit));
+    game.enemy = retargetSurvivalEnemy();
+  }
+
+  function survivalAttackTargets(entity, fallback) {
+    if (entity?.kind === "player" && isSurvivalMode()) return activeSurvivalEnemies();
+    return fallback ? [fallback] : [];
+  }
+
+  function separateSurvivalEnemies(dt) {
+    const living = activeSurvivalEnemies();
+    for (let i = 0; i < living.length; i++) {
+      for (let j = i + 1; j < living.length; j++) {
+        const a = living[i];
+        const b = living[j];
+        const gap = b.x - a.x;
+        const minGap = 44;
+        if (Math.abs(gap) > 0 && Math.abs(gap) < minGap) {
+          const push = (minGap - Math.abs(gap)) * .5;
+          const dir = Math.sign(gap);
+          a.x = clamp(a.x - dir * push * dt * 16, 35, W - 35);
+          b.x = clamp(b.x + dir * push * dt * 16, 35, W - 35);
+        }
+      }
+    }
+  }
+
   function makeRemotePlayer(slot = 2, name = "SATORU GOJO", character = "gojo", variant = "normal") {
     return {
       kind: "remote",
@@ -1008,7 +1097,9 @@
     game.state = "playing";
     game.player = makePlayer();
     game.wave = 1;
+    game.enemies = [];
     game.enemy = makeEnemy(selectedMode === "boss" ? 2 : 0);
+    if (selectedMode === "survival") spawnSurvivalWave(1);
     game.particles.length = 0;
     game.projectiles.length = 0;
     game.afterimages.length = 0;
@@ -1505,7 +1596,7 @@
     if (!p || !volley) return;
     volley.timer -= dt;
     while (volley.remaining > 0 && volley.timer <= 0) {
-      spawnDismantleSlash(p, game.enemy, volley);
+      spawnDismantleSlash(p, isSurvivalMode() ? retargetSurvivalEnemy() : game.enemy, volley);
       volley.remaining--;
       volley.timer += .2;
     }
@@ -2687,9 +2778,8 @@
   function collapseUnstablePurple() {
     const purple = game.unstablePurple;
     const p = game.player;
-    const e = game.enemy;
+    const primaryEnemy = isSurvivalMode() ? retargetSurvivalEnemy() : game.enemy;
     if (!purple) return;
-    const enemyDistance = Math.hypot(e.x - purple.x, (e.y - e.h / 2) - purple.y);
     const playerDistance = Math.hypot(p.x - purple.x, (p.y - p.h / 2) - purple.y);
     if (playerDistance < 430) {
       p.health -= 30;
@@ -2699,15 +2789,19 @@
       p.burnout = 9;
       p.attack = null;
     }
-    if (enemyDistance < 470) {
-      e.health -= 38;
-      e.vx = Math.sign(e.x - purple.x || purple.facing) * 780;
-      e.vy = -440;
-      e.stun = 1.35;
-      e.reaction = "purpleBlast";
+    const purpleTargets = isSurvivalMode() ? activeSurvivalEnemies() : [primaryEnemy].filter(Boolean);
+    for (const e of purpleTargets) {
+      const enemyDistance = Math.hypot(e.x - purple.x, (e.y - e.h / 2) - purple.y);
+      if (enemyDistance < 470) {
+        e.health -= 38;
+        e.vx = Math.sign(e.x - purple.x || purple.facing) * 780;
+        e.vy = -440;
+        e.stun = 1.35;
+        e.reaction = "purpleBlast";
+        e.burned = true;
+      }
     }
     p.burned = true;
-    e.burned = true;
     game.props.forEach((prop) => {
       if (Math.abs(prop.x + prop.w / 2 - purple.x) < 500) prop.hp = 0;
     });
@@ -2949,6 +3043,7 @@
     const boss = e.type.boss;
     const defs = {
       light: { name: "Rend", duration: .48, start: .18, end: .29, range: 64, h: 62, y: -76, damage: 10, kbX: 210, kbY: 100 },
+      barrage: { name: "Curse Barrage", duration: .7, start: .15, end: .53, range: 70, h: 66, y: -78, damage: 12, kbX: 150, kbY: 70 },
       heavy: { name: "Calamity Crush", duration: .78, start: .38, end: .53, range: boss ? 105 : 83, h: 80, y: -87, damage: boss ? 22 : 17, kbX: 390, kbY: 290, strong: true },
       sweep: { name: "Night Sweep", duration: .62, start: .29, end: .43, range: 92, h: 42, y: -42, damage: 14, kbX: 260, kbY: 210 },
     };
@@ -3263,15 +3358,16 @@
     attack.active = attack.elapsed >= attack.start && attack.elapsed <= attack.end;
     if (attack.active && attack.range) {
       const box = attackBox(entity, attack);
-      if (!attack.hit.has(target) && rectsOverlap(box, bodyBox(target))) {
-        attack.hit.add(target);
+      for (const currentTarget of survivalAttackTargets(entity, target)) {
+        if (!currentTarget || attack.hit.has(currentTarget) || !rectsOverlap(box, bodyBox(currentTarget))) continue;
+        attack.hit.add(currentTarget);
         const predictedOnlineHit = game.online.active && game.online.authoritative
-          && entity.kind === "player" && target.kind === "remote";
+          && entity.kind === "player" && currentTarget.kind === "remote";
         if (predictedOnlineHit) {
           attack.hitConfirmed = true;
           spawnParticles(
-            target.x - entity.facing * 12,
-            target.y - target.h * .58,
+            currentTarget.x - entity.facing * 12,
+            currentTarget.y - currentTarget.h * .58,
             attack.color || "#64eaff",
             attack.strong ? 16 : 8,
             attack.strong ? 360 : 240,
@@ -3280,7 +3376,7 @@
           );
           game.hitstop = attack.strong ? .055 : .025;
           game.shake = Math.max(game.shake, attack.strong ? 7 : 3);
-        } else if (applyHit(entity, target, attack)) {
+        } else if (applyHit(entity, currentTarget, attack)) {
           attack.hitConfirmed = true;
         }
       }
@@ -3541,12 +3637,34 @@
       if (!p.attack && !p.wall) p.state = "jump";
     }
 
-    if (!p.attack && Math.abs(e.x - p.x) > 18) p.facing = e.x > p.x ? 1 : -1;
-    updateAttack(p, e, dt * (p.jackpot > 0 ? 1.3 : p.awakening > 0 ? (p.character === "sukuna" ? 1.2 : 1.13) : 1));
+    const targetEnemy = isSurvivalMode() ? retargetSurvivalEnemy() : e;
+    if (targetEnemy && !p.attack && Math.abs(targetEnemy.x - p.x) > 18) p.facing = targetEnemy.x > p.x ? 1 : -1;
+    if (targetEnemy) updateAttack(p, targetEnemy, dt * (p.jackpot > 0 ? 1.3 : p.awakening > 0 ? (p.character === "sukuna" ? 1.2 : 1.13) : 1));
   }
 
   function updateEnemy(dt) {
-    const e = game.enemy;
+    if (isSurvivalMode()) {
+      updateSurvivalEnemies(dt);
+      return;
+    }
+    updateEnemyEntity(game.enemy, dt);
+  }
+
+  function updateSurvivalEnemies(dt) {
+    const living = activeSurvivalEnemies();
+    if (!living.length) {
+      retargetSurvivalEnemy();
+      return;
+    }
+    for (const enemy of living) {
+      game.enemy = enemy;
+      updateEnemyEntity(enemy, dt);
+    }
+    separateSurvivalEnemies(dt);
+    retargetSurvivalEnemy();
+  }
+
+  function updateEnemyEntity(e, dt) {
     const p = game.player;
     if (!e) return;
     if (game.online.active && e.kind === "remote") {
@@ -3598,7 +3716,7 @@
       e.aiTimer -= dt;
       const dist = Math.abs(p.x - e.x);
       if (e.aiTimer <= 0) {
-        const aggression = difficulty === "easy" ? .72 : difficulty === "hard" ? 1.18 : 1;
+        const aggression = (difficulty === "easy" ? .72 : difficulty === "hard" ? 1.18 : 1) * Number(e.type.aiLevel || 1);
         e.aiTimer = rnd(.18, .48) / aggression;
         if (e.type.boss && e.energy >= 80 && !e.domainUsed && e.health < e.maxHealth * .48) {
           e.domainUsed = true;
@@ -3619,8 +3737,8 @@
           e.aiTimer = .38;
         } else if (dist < 105 && e.baiting <= 0) {
           const roll = Math.random();
-          enemyStartAttack(roll > .7 ? "heavy" : roll > .38 ? "sweep" : "light");
-        } else if (dist < 270 && chance(.2 * aggression)) {
+          enemyStartAttack(e.survivalCurse ? (roll < Number(e.type.barrageChance || .35) ? "barrage" : "light") : roll > .7 ? "heavy" : roll > .38 ? "sweep" : "light");
+        } else if (!e.survivalCurse && dist < 270 && chance(.2 * aggression)) {
           enemyProjectile();
         } else {
           e.decision = "approach";
@@ -3941,23 +4059,28 @@
       const incomingBox = { x: o.x - o.w / 2, y: o.y - o.h / 2, w: o.w, h: o.h };
       if (o.owner === "enemy" && rectsOverlap(incomingBox, bodyBox(p))) reflectProjectile(o);
       if (o.type === "blue") {
-        const blueTarget = o.owner === "player" ? e : p;
         const blueAttacker = o.owner === "player" ? p : e;
-        const dx = o.x - blueTarget.x;
-        const dy = o.y - (blueTarget.y - blueTarget.h / 2);
-        const dist = Math.hypot(dx, dy);
-        if (dist < 340) {
-          const predictedRemote = game.online.active && game.online.authoritative && blueTarget.kind === "remote";
-          if (!predictedRemote) {
-            blueTarget.vx += (dx / Math.max(1, dist)) * 940 * dt;
-            blueTarget.vy += (dy / Math.max(1, dist)) * 470 * dt;
-          }
-          o.tick = Number.isFinite(o.tick) ? o.tick - dt : 0;
-          if (!predictedRemote && !o.visualOnly && o.tick <= 0 && dist < 85) {
-            applyHit(blueAttacker, blueTarget, { name: "Blue", type: "special", damage: o.damage, kbX: 20, kbY: 0, color: "#3d8dff", fixedDamage: o.reflected });
-            o.tick = .38;
+        const blueTargets = o.owner === "player" && isSurvivalMode() ? activeSurvivalEnemies() : [o.owner === "player" ? e : p].filter(Boolean);
+        o.tick = Number.isFinite(o.tick) ? o.tick - dt : 0;
+        const pulseReady = !o.visualOnly && o.tick <= 0;
+        let pulsed = false;
+        for (const blueTarget of blueTargets) {
+          const dx = o.x - blueTarget.x;
+          const dy = o.y - (blueTarget.y - blueTarget.h / 2);
+          const dist = Math.hypot(dx, dy);
+          if (dist < 340) {
+            const predictedRemote = game.online.active && game.online.authoritative && blueTarget.kind === "remote";
+            if (!predictedRemote) {
+              blueTarget.vx += (dx / Math.max(1, dist)) * 940 * dt;
+              blueTarget.vy += (dy / Math.max(1, dist)) * 470 * dt;
+            }
+            if (!predictedRemote && pulseReady && dist < 85) {
+              applyHit(blueAttacker, blueTarget, { name: "Blue", type: "special", damage: o.damage, kbX: 20, kbY: 0, color: "#3d8dff", fixedDamage: o.reflected });
+              pulsed = true;
+            }
           }
         }
+        if (pulsed) o.tick = .38;
         if (chance(.35)) spawnParticles(o.x, o.y, "#4e7fff", 1, 80, 3, .3);
       }
       if (o.visualOnly) {
@@ -3965,10 +4088,14 @@
         continue;
       }
 
-      const target = o.owner === "player" ? e : p;
       const box = { x: o.x - o.w / 2, y: o.y - o.h / 2, w: o.w, h: o.h };
-      if (o.type !== "blue" && !o.hitTarget && rectsOverlap(box, bodyBox(target))) {
+      const projectileTargets = o.owner === "player" && isSurvivalMode() ? activeSurvivalEnemies() : [o.owner === "player" ? e : p].filter(Boolean);
+      for (const target of projectileTargets) {
+        if (!target || o.hitTarget || (o.hitTargets && o.hitTargets.has(target)) || o.type === "blue" || !rectsOverlap(box, bodyBox(target))) continue;
+        o.hitTargets ||= new Set();
+        o.hitTargets.add(target);
         const attacker = o.owner === "player" ? p : e;
+        if (!attacker) continue;
         const predictedRemote = game.online.active && game.online.authoritative
           && attacker.kind === "player" && target.kind === "remote";
         const projectileNames = {
@@ -4014,8 +4141,11 @@
           }
           announce("FUGA IMPACT");
         }
-        o.hitTarget = true;
-        if (!o.erasing) o.life = 0;
+        if (!o.erasing) {
+          o.hitTarget = true;
+          o.life = 0;
+          break;
+        }
       }
 
       if (o.life <= 0 || o.x < -300 || o.x > W + 300) {
@@ -4055,7 +4185,8 @@
   function updateUnstablePurple(dt) {
     const purple = game.unstablePurple;
     if (!purple) return;
-    const e = game.enemy;
+    const e = isSurvivalMode() ? retargetSurvivalEnemy() : game.enemy;
+    if (!e) return;
     if (purple.state === "firing") {
       purple.fireTimer -= dt;
       purple.timer = purple.fireTimer;
@@ -4252,7 +4383,7 @@
     const p = game.player;
     const e = game.enemy;
     p.lagHealth = lerp(p.lagHealth, p.health, clamp(dt * 2, 0, 1));
-    e.lagHealth = lerp(e.lagHealth, e.health, clamp(dt * 2, 0, 1));
+    if (e) e.lagHealth = lerp(e.lagHealth, e.health, clamp(dt * 2, 0, 1));
 
     if (game.online.active) {
       if (game.online.authoritative) return;
@@ -4268,6 +4399,40 @@
       }
       return;
     }
+
+    if (game.mode === "survival") {
+      for (const enemy of game.enemies) {
+        enemy.lagHealth = lerp(enemy.lagHealth, enemy.health, clamp(dt * 2, 0, 1));
+        if (enemy.health <= 0) {
+          enemy.health = 0;
+          enemy.stun = Math.max(enemy.stun, .8);
+        }
+      }
+      const living = activeSurvivalEnemies();
+      retargetSurvivalEnemy();
+      if (!living.length && !game.outcomePending) {
+        game.outcomePending = true;
+        game.transition = 1.15;
+        game.score += Math.round(game.time * 28 + p.health * 12 + game.wave * 450);
+        announce("WAVE CLEAR");
+      }
+      if ((p.health <= 0 || game.time <= 0) && !game.outcomePending) {
+        game.outcomePending = true;
+        p.health = Math.max(0, p.health);
+        game.transition = 1.5;
+        announce(p.health <= 0 ? "LIMIT REACHED" : "TIME");
+      }
+      if (game.outcomePending) {
+        game.transition -= dt;
+        if (game.transition <= 0) {
+          if (p.health > 0 && game.time > 0 && !activeSurvivalEnemies().length && continueMode()) return;
+          finishGame(p.health > 0 && !activeSurvivalEnemies().length);
+        }
+      }
+      return;
+    }
+
+    if (!e) return;
 
     if (game.mode === "training" && e.health <= 15) {
       e.health = e.maxHealth;
@@ -4333,17 +4498,14 @@
     }
     if (game.mode === "survival") {
       game.wave++;
-      game.enemy = makeEnemy(Math.min(2, Math.floor((game.wave - 1) / 2)));
-      game.enemy.maxHealth *= 1 + game.wave * .045;
-      game.enemy.health = game.enemy.maxHealth;
-      game.enemy.lagHealth = game.enemy.maxHealth;
+      spawnSurvivalWave(game.wave);
       game.player.health = Math.min(game.player.maxHealth, game.player.health + 8);
       game.player.energy = Math.min(100, game.player.energy + 15);
       game.unstablePurple = null;
       game.time += 22;
       game.outcomePending = false;
       game.projectiles.length = 0;
-      announce(`WAVE ${game.wave}`);
+      announce(`WAVE ${game.wave} - ${survivalEnemyLimit(game.wave)} CURSES`);
       return true;
     }
     if (game.mode === "boss" && game.wave < 3) {
@@ -4551,6 +4713,29 @@
     try { localStorage.setItem(GUEST_PROGRESS_KEY, JSON.stringify(normalizeProgress(progress))); } catch {}
   }
 
+  function progressHasMeaningfulData(progress) {
+    const clean = normalizeProgress(progress);
+    const stats = clean.stats;
+    const played = Object.values(stats.charactersPlayed || {}).some((count) => accountNumber(count) > 0);
+    const statsTotal = stats.totalWins + stats.totalLosses + stats.bestSurvivalWave + stats.bossRushClears
+      + stats.maxCombo + stats.blackFlashes + stats.domainsUsed;
+    const unlocks = cleanList(clean.unlocks.costumes).filter((name) => name !== "uniform").length
+      + cleanList(clean.unlocks.titles).length
+      + cleanList(clean.unlocks.badges).length;
+    return statsTotal > 0 || played || unlocks > 0;
+  }
+
+  function guestMergeKey() {
+    const profile = accountState.user || {};
+    const raw = profile.email || profile.displayName || "google-user";
+    const safe = String(raw).replace(/[^a-z0-9_.@-]/gi, "_").slice(0, 96);
+    return `voidLimitGuestMerged:${safe}`;
+  }
+
+  function guestProgressSignature(progress) {
+    return JSON.stringify(normalizeProgress(progress));
+  }
+
   function syncLocalUnlocks(progress) {
     const costumes = cleanList(progress?.unlocks?.costumes, unlockedCostumes());
     try { localStorage.setItem("voidLimitCostumes", JSON.stringify(costumes)); } catch {}
@@ -4575,6 +4760,17 @@
     ui.accountStatus.textContent = message;
     ui.accountStatus.classList.toggle("error", kind === "error");
     ui.accountStatus.classList.toggle("ok", kind === "ok");
+  }
+
+  function updateGoogleOriginHelp() {
+    if (!ui.googleOriginHelp) return;
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      ui.googleOriginHelp.classList.add("error");
+      ui.googleOriginHelp.textContent = "Google blocks file:// pages. Run start-online.bat, then open http://localhost:4173 for Sign In or Sign Up.";
+      return;
+    }
+    ui.googleOriginHelp.classList.remove("error");
+    ui.googleOriginHelp.textContent = `Current Google origin: ${location.origin}. If Google says "no registered origin", add this exact origin in Google Cloud OAuth Authorized JavaScript origins.`;
   }
 
   function setAccountAvatar(img, url) {
@@ -4605,6 +4801,7 @@
   }
 
   function updateAccountUi() {
+    updateGoogleOriginHelp();
     const profile = accountState.user;
     const progress = accountState.progress || loadGuestProgress();
     const signed = Boolean(profile && !accountState.isGuest);
@@ -4670,7 +4867,7 @@
     if (!SERVER_ACCOUNTS_AVAILABLE) {
       accountState.user = null;
       accountState.isGuest = true;
-      setAccountStatus("Google accounts require running the server. Guest mode is available.");
+      setAccountStatus("Run start-online.bat, then open http://localhost:4173 to sign in or sign up. Guest Mode works here.", "error");
       updateAccountUi();
       return accountState.progress;
     }
@@ -4689,9 +4886,9 @@
         accountState.isGuest = true;
         setAccountStatus(
           googleClientId
-            ? "Guest mode is active."
+            ? `Google ready for ${location.origin}. If sign-in says no registered origin, add this origin in Google Cloud.`
             : "Google login is not configured. Guest Mode is still available.",
-          googleClientId ? "" : "error",
+          googleClientId ? "ok" : "error",
         );
       }
     } catch {
@@ -4733,11 +4930,22 @@
   async function accountMergeGuestProgress() {
     if (accountState.isGuest || !accountState.user) return;
     const guest = loadGuestProgress();
+    if (!progressHasMeaningfulData(guest)) {
+      try { localStorage.removeItem(GUEST_PROGRESS_KEY); } catch {}
+      return;
+    }
+    const mergeKey = guestMergeKey();
+    const signature = guestProgressSignature(guest);
+    if (localStorage.getItem(mergeKey) === signature) {
+      try { localStorage.removeItem(GUEST_PROGRESS_KEY); } catch {}
+      return;
+    }
     try {
       const data = await accountRequest("/api/save-progress", { method: "POST", body: JSON.stringify({ progress: guest }) });
       accountState.user = data.user;
       accountState.progress = progressFromProfile(data.user);
       syncLocalUnlocks(accountState.progress);
+      localStorage.setItem(mergeKey, signature);
       localStorage.removeItem(GUEST_PROGRESS_KEY);
     } catch {
       setAccountStatus("Cloud merge failed, guest save kept locally.", "error");
@@ -4907,8 +5115,9 @@
 
   function updateHud() {
     const p = game.player;
-    const e = game.enemy;
+    const e = isSurvivalMode() ? retargetSurvivalEnemy() : game.enemy;
     if (!p || !e) return;
+    const survivalLiving = activeSurvivalEnemies();
     const profile = characterProfile(p);
     const enemyProfile = game.online.active ? characterProfile(e) : null;
     ui.playerHealth.style.transform = `scaleX(${clamp(p.health / p.maxHealth, 0, 1)})`;
@@ -4922,10 +5131,12 @@
     const playerMark = p.character === "sukuna" ? "SK" : p.character === "hakari" ? "HK" : p.character === "higuruma" ? "HG" : "VI";
     ui.playerPortrait.className = `portrait ${playerPortrait}`;
     ui.playerPortrait.querySelector("span").textContent = playerMark;
-    ui.enemyName.textContent = `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
+    ui.enemyName.textContent = isSurvivalMode()
+      ? `SURVIVAL CURSES ${survivalLiving.length}/${survivalEnemyLimit(game.wave)}`
+      : `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
     ui.enemyState.textContent = game.online.active
       ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}${e.burned ? " / BURNED" : ""}`
-      : e.type.rank;
+      : isSurvivalMode() ? `${e.type.rank} TARGET / PUNCH + BARRAGE` : e.type.rank;
     const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : e.character === "higuruma" ? "higuruma-portrait" : "gojo-portrait";
     const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : e.character === "higuruma" ? "HG" : "VI";
     ui.enemyPortrait.className = `portrait ${game.online.active ? enemyPortrait : "curse-portrait"}`;
@@ -4951,7 +5162,7 @@
     ui.timer.textContent = game.mode === "training" ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
     ui.mode.textContent = game.mode.toUpperCase();
     ui.wave.textContent = game.online.active ? `P${game.online.slot} / ${Math.max(0, Math.round(game.online.startAt - Date.now())) > 0 ? "SYNC" : "LIVE"}`
-      : game.mode === "survival" ? `WAVE ${game.wave}` : game.mode === "training" ? "FRAME LAB" : `ENCOUNTER ${game.wave}`;
+      : game.mode === "survival" ? `WAVE ${game.wave} / CAP ${survivalEnemyLimit(game.wave)}` : game.mode === "training" ? "FRAME LAB" : `ENCOUNTER ${game.wave}`;
     ui.stageLabel.textContent = `${stages[selectedStage].name} / ${stages[selectedStage].subtitle}`;
     ui.combo.querySelector("strong").textContent = p.comboHits;
     ui.combo.classList.toggle("visible", p.comboHits >= 2 && p.comboTimer > 0);
@@ -6920,7 +7131,9 @@
       drawUnstablePurple();
       drawRemoteUnstablePurple();
       if (game.player) drawFighter(game.player);
-      if (game.enemy) {
+      if (isSurvivalMode()) {
+        for (const enemy of activeSurvivalEnemies()) drawCurse(enemy);
+      } else if (game.enemy) {
         if (game.online.active && game.enemy.kind === "remote") drawFighter(game.enemy);
         else drawCurse(game.enemy);
       }
