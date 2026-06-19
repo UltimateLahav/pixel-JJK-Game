@@ -123,7 +123,6 @@
   let selectedCharacter = "gojo";
   let pendingOfflineSelection = false;
   let onlineSelection = false;
-  const GOOGLE_CLIENT_ID = "GOOGLE_CLIENT_ID_HERE";
   const GUEST_PROGRESS_KEY = "guestProgress";
   const GAME_SETTINGS_KEY = "voidLimitSettings";
   const SERVER_ACCOUNTS_AVAILABLE = location.protocol !== "file:";
@@ -133,6 +132,8 @@
   let selectionLocked = false;
   let onlineLockRequest = null;
   let gameSettings = null;
+  let googleClientId = "";
+  let googleScriptPromise = null;
   let audioCtx = null;
   let master = null;
   let hakariJackpotMusic = null;
@@ -4683,10 +4684,10 @@
         accountState.user = null;
         accountState.isGuest = true;
         setAccountStatus(
-          GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE"
-            ? "Google login unavailable. Add your Google OAuth Client ID first."
-            : "Guest mode is active.",
-          GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE" ? "error" : "",
+          googleClientId
+            ? "Guest mode is active."
+            : "Google login is not configured. Guest Mode is still available.",
+          googleClientId ? "" : "error",
         );
       }
     } catch {
@@ -4774,7 +4775,9 @@
     ui.accountPanel.classList.remove("hidden");
     updateAccountUi();
     if (!SERVER_ACCOUNTS_AVAILABLE) {
-      setAccountStatus("Google accounts require running the server. Guest mode is available.", "error");
+      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
+    } else if (!googleClientId) {
+      setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
     }
   }
 
@@ -4783,23 +4786,52 @@
     if (game.state === "menu") ui.menu.classList.remove("hidden");
   }
 
-  function initGoogleLogin() {
+  async function loadAccountConfig() {
     if (!SERVER_ACCOUNTS_AVAILABLE) {
-      setAccountStatus("Google accounts require running the server. Guest mode is available.");
+      googleClientId = "";
+      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
+      return "";
+    }
+    try {
+      const data = await accountRequest("/api/config");
+      googleClientId = String(data.googleClientId || "").trim();
+      return googleClientId;
+    } catch {
+      googleClientId = "";
+      setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
+      return "";
+    }
+  }
+
+  function loadGoogleIdentityScript() {
+    if (window.google?.accounts?.id) return Promise.resolve();
+    if (googleScriptPromise) return googleScriptPromise;
+    googleScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("Google login unavailable"));
+      document.head.appendChild(script);
+    });
+    return googleScriptPromise;
+  }
+
+  async function initGoogleLogin() {
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
       return;
     }
-    if (GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE") {
-      setAccountStatus("Google login unavailable. Add your Google OAuth Client ID first.", "error");
+    if (!googleClientId) {
+      setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
       return;
     }
-    let attempts = 0;
-    const tryInit = () => {
-      if (!window.google?.accounts?.id) {
-        if (attempts++ < 20) setTimeout(tryInit, 250);
-        return;
-      }
+    try {
+      await loadGoogleIdentityScript();
+      if (!window.google?.accounts?.id) throw new Error("Google login unavailable");
       window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
+        client_id: googleClientId,
         callback: (response) => accountLogin(response.credential),
       });
       if (ui.googleButtonMount && !ui.googleButtonMount.childElementCount) {
@@ -4812,8 +4844,9 @@
         });
         ui.googleFallbackButton?.classList.add("hidden");
       }
-    };
-    tryInit();
+    } catch {
+      setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
+    }
   }
 
   const accountState = {
@@ -4831,8 +4864,7 @@
   function initAccountSystem() {
     accountState.progress = loadGuestProgress();
     updateAccountUi();
-    initGoogleLogin();
-    accountLoadProgress().then((progress) => {
+    loadAccountConfig().then(() => initGoogleLogin()).then(() => accountLoadProgress()).then((progress) => {
       syncLocalUnlocks(progress);
       applySavedSettings(progress);
       updateAccountUi();
@@ -8178,15 +8210,17 @@
   });
   ui.googleFallbackButton?.addEventListener("click", () => {
     if (!SERVER_ACCOUNTS_AVAILABLE) {
-      setAccountStatus("Google accounts require running the server. Guest mode is available.", "error");
+      setAccountStatus("Google login requires running the Node server. Guest Mode is still available.", "error");
       return;
     }
-    if (GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE") {
-      setAccountStatus("Google login unavailable. Add your Google OAuth Client ID first.", "error");
+    if (!googleClientId) {
+      setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
       return;
     }
-    if (window.google?.accounts?.id) window.google.accounts.id.prompt();
-    else setAccountStatus("Google login unavailable. Continue as guest.", "error");
+    loadGoogleIdentityScript().then(() => {
+      if (window.google?.accounts?.id) window.google.accounts.id.prompt();
+      else setAccountStatus("Google login unavailable. Guest Mode is still available.", "error");
+    }).catch(() => setAccountStatus("Google login unavailable. Guest Mode is still available.", "error"));
   });
   ui.accountSignOut?.addEventListener("click", accountLogout);
   $("#resume").addEventListener("click", pauseGame);
