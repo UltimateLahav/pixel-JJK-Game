@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("http");
+const https = require("https");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -8,6 +9,11 @@ const { AuthoritativeMatch, TICK_MS } = require("./authoritative-match");
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
+const DATA_DIR = path.join(ROOT, "data");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "GOOGLE_CLIENT_ID_HERE";
+const SESSION_SECRET = process.env.SESSION_SECRET || "void-limit-local-session-secret";
 const rooms = new Map();
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const MIME = {
@@ -36,6 +42,331 @@ function token() {
 
 function safeName(value) {
   return String(value || "Gojo").replace(/[<>&]/g, "").trim().slice(0, 16) || "Gojo";
+}
+
+function publicGoogleClientId() {
+  const id = String(GOOGLE_CLIENT_ID || "").trim();
+  return id && id !== "GOOGLE_CLIENT_ID_HERE" ? id : "";
+}
+
+function safeText(value, fallback = "", max = 120) {
+  return String(value || fallback)
+    .replace(/[<>&]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max) || fallback;
+}
+
+function safeUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) ? url.toString().slice(0, 500) : "";
+  } catch {
+    return "";
+  }
+}
+
+function ensureDataFiles() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({ users: {} }, null, 2));
+  if (!fs.existsSync(SESSIONS_FILE)) fs.writeFileSync(SESSIONS_FILE, JSON.stringify({ sessions: {} }, null, 2));
+}
+
+function readJson(file, fallback) {
+  try {
+    ensureDataFiles();
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(file, data) {
+  ensureDataFiles();
+  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+}
+
+function defaultStats() {
+  return {
+    totalWins: 0,
+    totalLosses: 0,
+    bestSurvivalWave: 0,
+    bossRushClears: 0,
+    maxCombo: 0,
+    blackFlashes: 0,
+    domainsUsed: 0,
+    charactersPlayed: {},
+  };
+}
+
+function defaultUnlocks() {
+  return { costumes: ["uniform"], titles: [], badges: [] };
+}
+
+function defaultSettings() {
+  return { lastCharacter: "gojo", lastStage: "shinjuku", lastCostume: "uniform", difficulty: "normal" };
+}
+
+function cleanNumber(value) {
+  return Math.max(0, Math.floor(Number(value) || 0));
+}
+
+function uniqueStrings(values, fallback = []) {
+  const out = new Set(fallback);
+  if (Array.isArray(values)) {
+    for (const value of values) {
+      const clean = safeText(value, "", 40);
+      if (clean) out.add(clean);
+    }
+  }
+  return [...out];
+}
+
+function ensureProgressShape(user) {
+  user.stats = { ...defaultStats(), ...(user.stats || {}) };
+  user.stats.charactersPlayed = { ...(user.stats.charactersPlayed || {}) };
+  user.unlocks = { ...defaultUnlocks(), ...(user.unlocks || {}) };
+  user.unlocks.costumes = uniqueStrings(user.unlocks.costumes, ["uniform"]);
+  user.unlocks.titles = uniqueStrings(user.unlocks.titles);
+  user.unlocks.badges = uniqueStrings(user.unlocks.badges);
+  user.settings = { ...defaultSettings(), ...(user.settings || {}) };
+  return user;
+}
+
+function mergeProgress(user, progress = {}) {
+  ensureProgressShape(user);
+  const stats = progress.stats || {};
+  for (const key of ["totalWins", "totalLosses", "bossRushClears", "blackFlashes", "domainsUsed"]) {
+    user.stats[key] = cleanNumber(user.stats[key]) + cleanNumber(stats[key]);
+  }
+  user.stats.bestSurvivalWave = Math.max(cleanNumber(user.stats.bestSurvivalWave), cleanNumber(stats.bestSurvivalWave));
+  user.stats.maxCombo = Math.max(cleanNumber(user.stats.maxCombo), cleanNumber(stats.maxCombo));
+  if (stats.charactersPlayed && typeof stats.charactersPlayed === "object") {
+    for (const [character, count] of Object.entries(stats.charactersPlayed)) {
+      const id = safeText(character, "", 32);
+      if (id) user.stats.charactersPlayed[id] = cleanNumber(user.stats.charactersPlayed[id]) + cleanNumber(count);
+    }
+  }
+  const unlocks = progress.unlocks || {};
+  user.unlocks.costumes = uniqueStrings(unlocks.costumes, user.unlocks.costumes);
+  user.unlocks.titles = uniqueStrings(unlocks.titles, user.unlocks.titles);
+  user.unlocks.badges = uniqueStrings(unlocks.badges, user.unlocks.badges);
+  const settings = progress.settings || {};
+  for (const key of ["lastCharacter", "lastStage", "lastCostume", "difficulty"]) {
+    const clean = safeText(settings[key], "", 48);
+    if (clean) user.settings[key] = clean;
+  }
+  return user;
+}
+
+function publicProfile(user) {
+  ensureProgressShape(user);
+  return {
+    isGuest: false,
+    displayName: user.displayName,
+    email: user.email,
+    picture: user.picture,
+    stats: user.stats,
+    unlocks: user.unlocks,
+    settings: user.settings,
+  };
+}
+
+function sendJson(res, status, body, headers = {}) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    ...headers,
+  });
+  res.end(JSON.stringify(body));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) {
+        reject(new Error("Request too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch {
+        reject(new Error("Invalid JSON"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function parseCookies(req) {
+  const cookies = {};
+  for (const part of String(req.headers.cookie || "").split(";")) {
+    const index = part.indexOf("=");
+    if (index === -1) continue;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (key) cookies[key] = value;
+  }
+  return cookies;
+}
+
+function signSessionToken(value) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("base64url");
+}
+
+function sessionCookie(value, maxAge = 60 * 60 * 24 * 30) {
+  return `vl_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+}
+
+function createSession(googleSub) {
+  const sessions = readJson(SESSIONS_FILE, { sessions: {} });
+  const id = token();
+  const signed = `${id}.${signSessionToken(id)}`;
+  sessions.sessions[id] = { googleSub, createdAt: Date.now(), lastSeen: Date.now() };
+  writeJson(SESSIONS_FILE, sessions);
+  return signed;
+}
+
+function currentUser(req) {
+  const raw = parseCookies(req).vl_session || "";
+  const [id, sig] = raw.split(".");
+  if (!id || !sig || sig !== signSessionToken(id)) return null;
+  const sessions = readJson(SESSIONS_FILE, { sessions: {} });
+  const session = sessions.sessions[id];
+  if (!session) return null;
+  const users = readJson(USERS_FILE, { users: {} });
+  const user = users.users[session.googleSub];
+  if (!user) return null;
+  session.lastSeen = Date.now();
+  writeJson(SESSIONS_FILE, sessions);
+  return { id, session, users, user };
+}
+
+function base64UrlJson(value) {
+  return JSON.parse(Buffer.from(String(value).replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+}
+
+function base64UrlBuffer(value) {
+  return Buffer.from(String(value).replace(/-/g, "+").replace(/_/g, "/"), "base64");
+}
+
+let googleKeysCache = { expiresAt: 0, keys: [] };
+
+function fetchGoogleKeys() {
+  if (Date.now() < googleKeysCache.expiresAt && googleKeysCache.keys.length) return Promise.resolve(googleKeysCache.keys);
+  return new Promise((resolve, reject) => {
+    const req = https.get("https://www.googleapis.com/oauth2/v3/certs", { timeout: 5000 }, (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(body);
+          const maxAge = /max-age=(\d+)/i.exec(String(res.headers["cache-control"] || ""))?.[1];
+          googleKeysCache = {
+            expiresAt: Date.now() + Math.max(60, Number(maxAge) || 300) * 1000,
+            keys: parsed.keys || [],
+          };
+          resolve(googleKeysCache.keys);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error("Google login unavailable")));
+    req.on("error", reject);
+  });
+}
+
+async function verifyGoogleCredential(credential) {
+  if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === "GOOGLE_CLIENT_ID_HERE") {
+    throw new Error("Google login unavailable");
+  }
+  const parts = String(credential || "").split(".");
+  if (parts.length !== 3) throw new Error("Invalid Google credential");
+  const header = base64UrlJson(parts[0]);
+  const payload = base64UrlJson(parts[1]);
+  if (!["https://accounts.google.com", "accounts.google.com"].includes(payload.iss)) throw new Error("Invalid Google issuer");
+  if (payload.aud !== GOOGLE_CLIENT_ID) throw new Error("Invalid Google audience");
+  if (!payload.sub) throw new Error("Missing Google subject");
+  if (Number(payload.exp || 0) * 1000 < Date.now()) throw new Error("Expired Google credential");
+  const key = (await fetchGoogleKeys()).find((candidate) => candidate.kid === header.kid);
+  if (!key) throw new Error("Google login unavailable");
+  const publicKey = crypto.createPublicKey({ key, format: "jwk" });
+  const valid = crypto.verify("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), publicKey, base64UrlBuffer(parts[2]));
+  if (!valid) throw new Error("Invalid Google signature");
+  return payload;
+}
+
+async function handleApi(req, res) {
+  const pathname = new URL(req.url || "/", "http://localhost").pathname;
+  if (req.method === "OPTIONS") return sendJson(res, 204, {});
+  if (req.method === "GET" && pathname === "/api/config") {
+    return sendJson(res, 200, { googleClientId: publicGoogleClientId() });
+  }
+  if (req.method === "GET" && pathname === "/api/me") {
+    const auth = currentUser(req);
+    return sendJson(res, 200, auth ? { ok: true, isGuest: false, user: publicProfile(auth.user) } : { ok: true, isGuest: true, user: null });
+  }
+  if (req.method === "GET" && pathname === "/api/progress") {
+    const auth = currentUser(req);
+    return sendJson(res, 200, auth ? { ok: true, isGuest: false, progress: publicProfile(auth.user) } : { ok: true, isGuest: true, progress: null });
+  }
+  if (req.method === "POST" && pathname === "/api/auth/logout") {
+    const auth = currentUser(req);
+    if (auth) {
+      const sessions = readJson(SESSIONS_FILE, { sessions: {} });
+      delete sessions.sessions[auth.id];
+      writeJson(SESSIONS_FILE, sessions);
+    }
+    return sendJson(res, 200, { ok: true, isGuest: true }, { "Set-Cookie": sessionCookie("", 0) });
+  }
+  if (req.method === "POST" && pathname === "/api/save-progress") {
+    const auth = currentUser(req);
+    if (!auth) return sendJson(res, 401, { ok: false, error: "Login required" });
+    try {
+      const body = await readBody(req);
+      mergeProgress(auth.user, body.progress || {});
+      auth.users.users[auth.user.googleSub] = auth.user;
+      writeJson(USERS_FILE, auth.users);
+      return sendJson(res, 200, { ok: true, user: publicProfile(auth.user), message: "Progress saved" });
+    } catch {
+      return sendJson(res, 400, { ok: false, error: "Cloud save failed, local save kept" });
+    }
+  }
+  if (req.method === "POST" && pathname === "/api/auth/google") {
+    try {
+      const body = await readBody(req);
+      const payload = await verifyGoogleCredential(body.credential);
+      const users = readJson(USERS_FILE, { users: {} });
+      const now = new Date().toISOString();
+      const googleSub = safeText(payload.sub, "", 160);
+      const user = ensureProgressShape(users.users[googleSub] || {
+        googleSub,
+        createdAt: now,
+        stats: defaultStats(),
+        unlocks: defaultUnlocks(),
+        settings: defaultSettings(),
+      });
+      user.displayName = safeText(payload.name || payload.given_name, "Void Fighter", 80);
+      user.email = safeText(payload.email, "", 160);
+      user.picture = safeUrl(payload.picture);
+      user.lastLogin = now;
+      users.users[googleSub] = user;
+      writeJson(USERS_FILE, users);
+      const session = createSession(googleSub);
+      return sendJson(res, 200, { ok: true, user: publicProfile(user) }, { "Set-Cookie": sessionCookie(session) });
+    } catch (error) {
+      return sendJson(res, error.message === "Google login unavailable" ? 503 : 401, {
+        ok: false,
+        error: error.message === "Google login unavailable" ? "Google login unavailable" : "Login failed, continue as guest",
+      });
+    }
+  }
+  return sendJson(res, 404, { ok: false, error: "Not found" });
 }
 
 function roomView(room) {
@@ -439,6 +770,10 @@ function websocketClient(socket) {
 }
 
 const server = http.createServer((req, res) => {
+  if ((req.url || "/").split("?")[0].startsWith("/api/")) {
+    handleApi(req, res).catch(() => sendJson(res, 500, { ok: false, error: "Server error" }));
+    return;
+  }
   const rawPath = decodeURIComponent((req.url || "/").split("?")[0]);
   const relative = rawPath === "/" ? "index.html" : rawPath.replace(/^\/+/, "");
   const file = path.resolve(ROOT, relative);
