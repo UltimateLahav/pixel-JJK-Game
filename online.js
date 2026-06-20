@@ -390,6 +390,8 @@
       remoteCharacter: remote?.character || "gojo",
       localName: local?.name || "PLAYER",
       remoteName: remote?.name || "OPPONENT",
+      localVariant: local?.variant || "normal",
+      remoteVariant: remote?.variant || "normal",
     });
     const mapAssets = {
       shinjuku: "assets/stage-shinjuku.png",
