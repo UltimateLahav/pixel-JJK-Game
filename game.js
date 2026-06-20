@@ -5484,7 +5484,12 @@
       ...options,
     }).then(async (response) => {
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.ok === false) throw new Error(data.error || "Cloud save failed, local save kept");
+      if (!response.ok || data.ok === false) {
+        const error = new Error(data.error || "Cloud save failed, local save kept");
+        error.status = response.status;
+        error.data = data;
+        throw error;
+      }
       return data;
     });
   }
@@ -5695,11 +5700,18 @@
       await accountFlushPendingCloudProgress();
       setAccountStatus("Progress saved.", "ok");
       refreshAccountDebug();
-    } catch {
+    } catch (error) {
       const guest = mergeProgress(loadGuestProgress(), cleanDelta);
       saveGuestProgress(guest);
       queuePendingCloudProgress(cleanDelta);
-      setAccountStatus("Cloud save failed, local save kept.", "error");
+      if (error?.status === 401) {
+        accountState.user = null;
+        accountState.isGuest = true;
+        accountState.progress = guest;
+        setAccountStatus("Login expired. Progress is queued locally; sign in again to sync it.", "error");
+      } else {
+        setAccountStatus(error?.message || "Cloud save failed, local save kept.", "error");
+      }
       setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
     updateAccountUi();
@@ -5721,8 +5733,13 @@
       refreshAccountDebug();
       updateAccountUi();
       return true;
-    } catch {
-      setAccountStatus("Cloud save failed, queued progress kept.", "error");
+    } catch (error) {
+      setAccountStatus(
+        error?.status === 401
+          ? "Login expired. Queued progress is still safe locally."
+          : "Cloud save failed, queued progress kept.",
+        "error",
+      );
       setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
       return false;
     }
@@ -5746,9 +5763,14 @@
       refreshAccountDebug();
       updateAccountUi();
       return true;
-    } catch {
+    } catch (error) {
       queuePendingCloudProgress(delta);
-      setAccountStatus("Cloud repair failed, local account backup kept.", "error");
+      setAccountStatus(
+        error?.status === 401
+          ? "Login expired. Browser backup is queued for your next sign-in."
+          : "Cloud repair failed, local account backup kept.",
+        "error",
+      );
       setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
       return false;
     }
@@ -5776,8 +5798,14 @@
       localStorage.setItem(mergeKey, signature);
       localStorage.removeItem(GUEST_PROGRESS_KEY);
       refreshAccountDebug();
-    } catch {
-      setAccountStatus("Cloud merge failed, guest save kept locally.", "error");
+    } catch (error) {
+      queuePendingCloudProgress(guest);
+      setAccountStatus(
+        error?.status === 401
+          ? "Login expired. Guest progress is queued for your next sign-in."
+          : "Cloud merge failed, guest save kept locally.",
+        "error",
+      );
       setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
   }
