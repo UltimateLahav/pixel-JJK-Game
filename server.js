@@ -19,6 +19,7 @@ const MIGRATIONS_FILE = path.join(DATA_DIR, "migrations.json");
 const ACCOUNT_SECRET_FILE = path.join(DATA_DIR, "account-secret.txt");
 const DEFAULT_GOOGLE_CLIENT_ID = "985537852640-mj77hcjhvvpj0at4bmthoek3afbk88og.apps.googleusercontent.com";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
+const LEGACY_SESSION_SECRET = "void-limit-local-session-secret";
 let SESSION_SECRET = "";
 let dataReady = false;
 const rooms = new Map();
@@ -163,6 +164,24 @@ function legacyAccountFiles() {
   });
 }
 
+function legacyAccountSecretFiles() {
+  const parent = path.join(ROOT, "..");
+  const candidates = [
+    path.join(ROOT, "data", "account-secret.txt"),
+    path.join(ROOT, "void-limit-account-data", "account-secret.txt"),
+    path.join(parent, "void-limit-account-data", "account-secret.txt"),
+    path.join(ROOT, "outputs", "void-limit-account-data", "account-secret.txt"),
+    path.join(parent, "outputs", "void-limit-account-data", "account-secret.txt"),
+  ];
+  const seen = new Set();
+  return candidates.filter((file) => {
+    const key = path.resolve(file).toLowerCase();
+    if (seen.has(key) || samePath(file, ACCOUNT_SECRET_FILE)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function normalizeUsersMap(data) {
   if (data?.users && typeof data.users === "object") return data.users;
   if (data?.googleSub) return { [data.googleSub]: data };
@@ -240,13 +259,18 @@ function migrateOldSaves() {
     if (stat.size <= 0) continue;
     const hash = fileHash(file);
     const key = `${path.resolve(file).toLowerCase()}|${hash}`;
-    if (migrations.sources[key]) continue;
+    const isUsersFile = path.basename(file).toLowerCase() === "users.json";
+    const isSessionsFile = path.basename(file).toLowerCase() === "sessions.json";
+    const permanentUsersEmpty = !Object.keys(normalizeUsersMap(users)).length;
+    const permanentSessionsEmpty = !Object.keys(sessions.sessions || {}).length;
+    const allowRescue = (isUsersFile && permanentUsersEmpty) || (isSessionsFile && permanentSessionsEmpty);
+    if (migrations.sources[key] && !allowRescue) continue;
     const data = readJsonFile(file, null, false);
     if (!data) continue;
-    if (path.basename(file).toLowerCase() === "users.json") {
+    if (isUsersFile) {
       mergeUsersData(users, data, stat.mtimeMs);
       changedUsers = true;
-    } else if (path.basename(file).toLowerCase() === "sessions.json") {
+    } else if (isSessionsFile) {
       mergeSessionsData(sessions, data);
       changedSessions = true;
     }
@@ -272,6 +296,15 @@ function loadSessionSecret() {
   if (fs.existsSync(ACCOUNT_SECRET_FILE)) {
     const saved = fs.readFileSync(ACCOUNT_SECRET_FILE, "utf8").trim();
     if (saved) return saved;
+  }
+  for (const file of legacyAccountSecretFiles()) {
+    if (!fs.existsSync(file)) continue;
+    const saved = fs.readFileSync(file, "utf8").trim();
+    if (!saved) continue;
+    fs.writeFileSync(`${ACCOUNT_SECRET_FILE}.tmp`, `${saved}\n`);
+    fs.renameSync(`${ACCOUNT_SECRET_FILE}.tmp`, ACCOUNT_SECRET_FILE);
+    console.log(`[account] Migrated account secret from ${file}`);
+    return saved;
   }
   const generated = crypto.randomBytes(32).toString("base64url");
   fs.writeFileSync(`${ACCOUNT_SECRET_FILE}.tmp`, `${generated}\n`);
@@ -377,6 +410,7 @@ function publicProfile(user) {
   ensureProgressShape(user);
   return {
     isGuest: false,
+    accountId: user.googleSub,
     displayName: user.displayName,
     email: user.email,
     picture: user.picture,
@@ -432,6 +466,15 @@ function signSessionToken(value) {
   return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("base64url");
 }
 
+function signSessionTokenWith(value, secret) {
+  return crypto.createHmac("sha256", secret).update(value).digest("base64url");
+}
+
+function validSessionSignature(id, signature) {
+  const secrets = [SESSION_SECRET, LEGACY_SESSION_SECRET].filter(Boolean);
+  return secrets.some((secret) => signature === signSessionTokenWith(id, secret));
+}
+
 function sessionCookie(value, maxAge = 60 * 60 * 24 * 30) {
   return `vl_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
 }
@@ -448,7 +491,7 @@ function createSession(googleSub) {
 function currentUser(req) {
   const raw = parseCookies(req).vl_session || "";
   const [id, sig] = raw.split(".");
-  if (!id || !sig || sig !== signSessionToken(id)) return null;
+  if (!id || !sig || !validSessionSignature(id, sig)) return null;
   const sessions = readJson(SESSIONS_FILE, { sessions: {} });
   const session = sessions.sessions[id];
   if (!session) return null;
@@ -525,11 +568,21 @@ async function handleApi(req, res) {
     ensureDataFiles();
     const users = readJson(USERS_FILE, { users: {} });
     const auth = currentUser(req);
+    let canWrite = false;
+    try {
+      const probe = path.join(DATA_DIR, ".write-test");
+      fs.writeFileSync(probe, String(Date.now()));
+      fs.unlinkSync(probe);
+      canWrite = true;
+    } catch {}
     return sendJson(res, 200, {
       ok: true,
       dataDir: DATA_DIR,
+      dataDirSource: process.env.VOID_LIMIT_DATA_DIR ? "VOID_LIMIT_DATA_DIR" : "default",
       usersFileExists: fs.existsSync(USERS_FILE),
       sessionsFileExists: fs.existsSync(SESSIONS_FILE),
+      accountSecretFileExists: fs.existsSync(ACCOUNT_SECRET_FILE),
+      canWrite,
       userCount: Object.keys(users.users || {}).length,
       currentUserSignedIn: Boolean(auth),
     });
