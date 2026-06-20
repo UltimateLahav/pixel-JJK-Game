@@ -1125,6 +1125,21 @@ canvas {
   overflow: hidden;
   image-rendering: pixelated;
 }
+.gameplay-preview {
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.pixel-portrait .gameplay-preview {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pixel-portrait canvas.gameplay-preview ~ i {
+  opacity: 0;
+}
 .pixel-portrait i { position: absolute; display: block; }
 .portrait-aura {
   inset: 15% 8% 0;
@@ -1236,13 +1251,25 @@ canvas {
 }
 .selection-player {
   display: grid;
-  grid-template-columns: 46px 1fr auto;
+  grid-template-columns: 46px 58px minmax(0, 1fr) auto;
   align-items: center;
   min-height: 47px;
   padding: 7px 13px;
   color: #8ea0bf;
   border: 1px solid #344765;
   background: #080e1cdb;
+}
+.selection-preview {
+  width: 54px;
+  height: 54px;
+  margin: -6px 7px -6px -6px;
+  border: 1px solid #30466a;
+  background: radial-gradient(circle at 50% 62%, #182b48, #050812 72%);
+  clip-path: polygon(13% 0, 100% 0, 100% 82%, 82% 100%, 0 100%, 0 18%);
+}
+.selection-preview.empty {
+  opacity: .36;
+  filter: grayscale(1);
 }
 .selection-player > span { color: var(--cyan); font: 13px Consolas, monospace; }
 .selection-player strong { color: white; font-size: 11px; }
@@ -1331,6 +1358,19 @@ canvas {
     linear-gradient(90deg, transparent 22%, #0b1428 23% 43%, transparent 44% 56%, #0b1428 57% 77%, transparent 78%) 50% 250px/150px 60px no-repeat;
   filter: drop-shadow(0 0 24px #55e7ff66);
 }
+.intro-silhouette.gameplay-preview {
+  width: min(290px, 35vw);
+  height: min(360px, 57vh);
+  border: 1px solid #38557f;
+  background: radial-gradient(circle at 50% 59%, #1d335a 0 28%, #070b18 70%);
+  filter: drop-shadow(0 0 28px #55e7ff77);
+  clip-path: polygon(8% 0, 100% 0, 100% 88%, 85% 100%, 0 100%, 0 11%);
+}
+.intro-silhouette.gameplay-preview.sukuna { filter: drop-shadow(0 0 30px #ff315588); }
+.intro-silhouette.gameplay-preview.hakari { filter: drop-shadow(0 0 30px #58ff8c99); }
+.intro-silhouette.gameplay-preview.higuruma { filter: drop-shadow(0 0 30px #f2cf7488); }
+.intro-silhouette.gameplay-preview.curse { filter: drop-shadow(0 0 30px #b9296088); }
+.intro-silhouette.gameplay-preview.inverted { filter: drop-shadow(0 0 30px #ff55ac88); }
 .intro-silhouette.sukuna {
   filter: sepia(.8) saturate(3) hue-rotate(310deg) drop-shadow(0 0 24px #ff315588);
 }
@@ -1402,6 +1442,8 @@ canvas {
 .fighter-card { display: flex; gap: 10px; min-width: 0; }
 .enemy-card { text-align: right; }
 .portrait {
+  position: relative;
+  overflow: hidden;
   width: 64px;
   height: 64px;
   flex: 0 0 64px;
@@ -1411,6 +1453,13 @@ canvas {
   background: linear-gradient(135deg, #223962, #0d1125);
   clip-path: polygon(12% 0, 100% 0, 100% 84%, 83% 100%, 0 100%, 0 16%);
 }
+.portrait .gameplay-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.portrait canvas.gameplay-preview + span { display: none; }
 .portrait span { font: 26px "Press Start 2P"; color: #d9f9ff; text-shadow: 3px 3px #3158cc; }
 .curse-portrait { border-color: #ff6489; background: linear-gradient(135deg, #51253d, #160d1a); }
 .curse-portrait span { color: #ff9ab3; text-shadow: 3px 3px #931b51; }
