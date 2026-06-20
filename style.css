@@ -417,6 +417,32 @@ canvas {
 }
 .account-status.error { color: #ff6d8e; }
 .account-status.ok { color: #87f7ff; }
+.account-save-connection {
+  margin: -6px 0 14px;
+  color: #8fa7c9;
+  font-size: 10px;
+  letter-spacing: .8px;
+  text-align: center;
+}
+.account-save-connection.ok { color: #87f7ff; }
+.account-save-connection.error { color: #ff8aa5; }
+.account-origin-help {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: #9db0d0;
+  border: 1px solid #344967;
+  background: #050914d9;
+  font-size: 10px;
+  letter-spacing: .7px;
+  line-height: 1.45;
+  text-align: center;
+}
+.account-origin-help strong { color: #ffd36d; }
+.account-origin-help.error {
+  color: #ffd4df;
+  border-color: #ff6d8e66;
+  background: #1b0711d9;
+}
 .account-profile {
   display: grid;
   grid-template-columns: auto 1fr;
