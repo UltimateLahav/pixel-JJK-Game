@@ -1210,7 +1210,7 @@
     game.flash = 0;
     game.hitstop = 0;
     game.slow = 0;
-    game.time = selectedMode === "training" ? 999 : selectedMode === "survival" ? 120 : 99;
+    game.time = selectedMode === "training" || selectedMode === "domainUse" ? Infinity : selectedMode === "survival" ? 120 : 99;
     game.score = 0;
     game.maxCombo = 0;
     game.parries = 0;
@@ -1290,7 +1290,7 @@
       special: "", specialRelease: "", fuga: false, domain: false, awaken: false, clash: 0, trialChoice: -1,
     };
     game.online.stats = { damage: 0, parries: 0, blackFlashes: 0, domains: 0 };
-    game.time = Number(options.time) || 99;
+    game.time = Number(options.time) === 0 ? Infinity : Number(options.time) || 99;
     game.player.energy = Number(options.energy) || 70;
     game.player.character = selectedCharacter;
     game.player.onlineVariant = options.localVariant === "inverted" ? "inverted" : "normal";
@@ -3157,6 +3157,157 @@
     e.stateTime = 0;
   }
 
+  function enemyStartCharacterMelee(e, strong = false) {
+    if (!e || e.stun > 0 || e.attack) return false;
+    const chain = characterChains(e).ground;
+    const step = strong ? chain.length - 1 : Math.floor(rnd(0, Math.min(4, chain.length)));
+    const base = chain[clamp(step, 0, chain.length - 1)];
+    e.attack = {
+      ...base,
+      elapsed: 0,
+      hit: new Set(),
+      active: false,
+      type: strong || base.strong ? "heavy" : "light",
+      damage: base.damage * (strong ? 1.15 : .95),
+      specialCancel: false,
+      chainStep: step,
+    };
+    e.state = base.slash ? "slash" : base.gavel ? "gavel" : strong || base.strong ? "heavy" : "light";
+    e.stateTime = 0;
+    e.vx = e.facing * Number(strong ? 70 : 42);
+    return true;
+  }
+
+  function enemyProjectileCharacter(e, projectile) {
+    if (!e || !projectile) return false;
+    game.projectiles.push({ owner: "enemy", ...projectile });
+    e.state = projectile.castState || "cast";
+    e.stateTime = .35;
+    tone(projectile.tone || 160, .14, "sawtooth", .17, projectile.slide || 0);
+    return true;
+  }
+
+  function enemyStartCharacterSpecial(e) {
+    if (!e || e.stun > 0 || e.attack) return false;
+    const p = game.player;
+    const dist = Math.abs(p.x - e.x);
+    const facing = e.facing || (p.x > e.x ? 1 : -1);
+    e.energy = 100;
+    if (e.character === "gojo") {
+      const roll = Math.random();
+      if (roll > .82 && dist > 150) {
+        return enemyProjectileCharacter(e, {
+          type: "purple", x: e.x + facing * 94, y: e.y - 84,
+          vx: facing * 640, vy: 0, w: 160, h: 88, life: 1.25,
+          damage: 48, kbX: 780, kbY: 210, strong: true, erasing: true,
+          tone: 46, slide: 280,
+        });
+      }
+      if (roll > .45) {
+        return enemyProjectileCharacter(e, {
+          type: "red", x: e.x + facing * 55, y: e.y - 80,
+          vx: facing * 520, vy: 0, w: 48, h: 48, life: 1.5,
+          damage: 18, kbX: 620, kbY: 240, strong: true,
+          tone: 150, slide: -90,
+        });
+      }
+      return enemyProjectileCharacter(e, {
+        type: "blue", x: e.x + facing * 170, y: e.y - 105,
+        vx: facing * 55, vy: 0, w: 38, h: 38, life: 2.4,
+        damage: 2.3, tick: 0, strong: false,
+        tone: 250, slide: 180,
+      });
+    }
+    if (e.character === "sukuna") {
+      const roll = Math.random();
+      if (roll > .86 && dist > 120) {
+        return enemyProjectileCharacter(e, {
+          type: "worldSlash", x: e.x + facing * 70, y: e.y - 82,
+          vx: facing * 780, vy: 0, w: 190, h: 42, life: 1.05,
+          damage: 68, kbX: 760, kbY: 180, strong: true,
+          tone: 90, slide: -180,
+        });
+      }
+      if (dist < 135 && roll > .44) {
+        e.attack = {
+          name: "Cleave", elapsed: 0, duration: .52, start: .15, end: .34,
+          active: false, hit: new Set(), type: "cleave", range: 96, h: 74, y: -78,
+          damage: 24, kbX: 360, kbY: 130, reaction: "slash", color: "#ff244f", strong: true,
+        };
+        e.state = "slash";
+        return true;
+      }
+      return enemyProjectileCharacter(e, {
+        type: "dismantle", x: e.x + facing * 52, y: e.y - 74,
+        vx: facing * 640, vy: 0, w: 92, h: 26, life: .75,
+        damage: 18, kbX: 330, kbY: 80, strong: false,
+        tone: 230, slide: -160,
+      });
+    }
+    if (e.character === "hakari") {
+      const roll = Math.random();
+      if (dist < 125 && roll > .42) {
+        e.attack = {
+          name: roll > .72 ? "Fever Breaker" : "Rough Cursed Punch",
+          elapsed: 0, duration: roll > .72 ? .62 : .48, start: .12, end: roll > .72 ? .42 : .3,
+          active: false, hit: new Set(), type: "roughPunch", range: roll > .72 ? 112 : 88,
+          h: 72, y: -72, damage: roll > .72 ? 25 : 18, kbX: roll > .72 ? 430 : 330,
+          kbY: roll > .72 ? 420 : 160, reaction: roll > .72 ? "launcher" : "body",
+          color: "#55f087", strong: true, rough: true,
+        };
+        e.vx = facing * 280;
+        e.state = "roughPunch";
+        return true;
+      }
+      if (roll > .45) {
+        return enemyProjectileCharacter(e, {
+          type: "reserveBall", x: e.x + facing * 45, y: e.y - 72,
+          vx: facing * 520, vy: -120, w: 28, h: 28, life: 2.2,
+          damage: 30, kbX: 240, kbY: 120, strong: false, bounces: 2,
+          tone: 390, slide: 140,
+        });
+      }
+      return enemyProjectileCharacter(e, {
+        type: "door", x: e.x + facing * 92, y: e.y - 72,
+        vx: facing * 420, vy: 0, w: 58, h: 92, life: .9,
+        damage: 22, kbX: 380, kbY: 140, strong: true,
+        tone: 180, slide: -80,
+      });
+    }
+    if (e.character === "higuruma") {
+      if (e.executionSword > 0 && !e.executionSwordUsed && dist < 160 && chance(.34)) {
+        startExecutionSwordAttack(e, p);
+        return true;
+      }
+      const roll = Math.random();
+      if (roll > .72) {
+        e.attack = {
+          name: "Giant Gavel Sentence", elapsed: 0, duration: .88, start: .34, end: .56,
+          active: false, hit: new Set(), type: "sentence", range: 156, h: 108, y: -78,
+          damage: 45, kbX: 360, kbY: -720, reaction: "slam", color: "#f2cf74",
+          strong: true, gavel: true, downslam: true,
+        };
+      } else if (roll > .38) {
+        e.attack = {
+          name: "Gavel Hook", elapsed: 0, duration: .52, start: .12, end: .32,
+          active: false, hit: new Set(), type: "gavelHook", range: 210, h: 62, y: -72,
+          damage: 14, kbX: 210, kbY: 70, reaction: "body", color: "#d8aa48",
+          strong: false, gavel: true, pull: true,
+        };
+      } else {
+        e.attack = {
+          name: "Shapeshifting Gavel", elapsed: 0, duration: .48, start: .1, end: .28,
+          active: false, hit: new Set(), type: "gavel", range: 104, h: 66, y: -70,
+          damage: 22, kbX: 310, kbY: 120, reaction: "body", color: "#f2cf74",
+          strong: true, gavel: true,
+        };
+      }
+      e.state = "gavel";
+      return true;
+    }
+    return false;
+  }
+
   function attackBox(entity, attack) {
     const range = attack.range || 0;
     return {
@@ -3853,7 +4004,18 @@
       const dist = Math.abs(p.x - e.x);
       if (e.aiTimer <= 0) {
         const aggression = (difficulty === "easy" ? .72 : difficulty === "hard" ? 1.18 : 1) * Number(e.type.aiLevel || 1);
-        e.aiTimer = rnd(.18, .48) / aggression;
+        e.aiTimer = rnd(e.domainUse ? .22 : .18, e.domainUse ? .55 : .48) / aggression;
+        if (e.domainUse && e.character) {
+          if (dist < 118 && chance(.58)) {
+            enemyStartCharacterMelee(e, chance(.38));
+          } else if (dist < 420 && chance(.72)) {
+            if (!enemyStartCharacterSpecial(e)) e.decision = "approach";
+          } else if (dist < 135) {
+            enemyStartCharacterMelee(e, false);
+          } else {
+            e.decision = "approach";
+          }
+        } else {
         if (e.type.boss && e.energy >= 80 && !e.domainUsed && e.health < e.maxHealth * .48) {
           e.domainUsed = true;
           e.energy -= 80;
@@ -3878,6 +4040,7 @@
           enemyProjectile();
         } else {
           e.decision = "approach";
+        }
         }
       }
       if (e.decision === "approach" && !e.attack) {
@@ -4562,7 +4725,7 @@
   }
 
   function checkRound(dt) {
-    if (game.mode !== "training" && game.domain <= 0 && game.domainStartup <= 0) game.time = Math.max(0, game.time - dt);
+    if (game.mode !== "training" && Number.isFinite(game.time) && game.domain <= 0 && game.domainStartup <= 0) game.time = Math.max(0, game.time - dt);
     const p = game.player;
     const e = game.enemy;
     p.lagHealth = lerp(p.lagHealth, p.health, clamp(dt * 2, 0, 1));
@@ -5329,7 +5492,7 @@
       : p.chargeRecovery > 0
         ? `CHARGE RECOVERY ${p.chargeRecovery.toFixed(1)}s`
         : p.chargeCooldown > 0 ? `CHARGE COOLDOWN ${p.chargeCooldown.toFixed(1)}s` : normalPlayerState;
-    ui.timer.textContent = game.mode === "training" ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
+    ui.timer.textContent = game.mode === "training" || !Number.isFinite(game.time) ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
     ui.mode.textContent = game.mode === "domainUse" ? "DOMAIN USE" : game.mode.toUpperCase();
     ui.wave.textContent = game.online.active ? `P${game.online.slot} / ${Math.max(0, Math.round(game.online.startAt - Date.now())) > 0 ? "SYNC" : "LIVE"}`
       : game.mode === "domainUse" ? `DOMAIN ENEMY`
@@ -7891,7 +8054,7 @@
     const remote = snapshot.players?.[remoteSlot];
     if (!local || !remote) return;
     game.online.serverFrame = snapshot.tick;
-    game.time = Number(snapshot.remainingTicks || 0) / 60;
+    game.time = Number(snapshot.remainingTicks) < 0 ? Infinity : Number(snapshot.remainingTicks || 0) / 60;
 
     const errorX = local.x - game.player.x;
     const errorY = local.y - game.player.y;
