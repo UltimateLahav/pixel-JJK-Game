@@ -676,6 +676,125 @@ canvas {
   text-align: center;
 }
 
+.casual-panel {
+  position: absolute;
+  z-index: 16;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 72% 18%, #6c55ff42, transparent 34%),
+    radial-gradient(circle at 18% 82%, #55e7ff2e, transparent 34%),
+    linear-gradient(90deg, #030611f7, #07132df2),
+    var(--stage-bg, url("assets/stage-shinjuku.png")) center/cover;
+}
+.casual-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 89px, #55e7ff0a 90px),
+    linear-gradient(120deg, transparent 0 49.8%, #8a6bff24 50%, transparent 50.2%);
+}
+.casual-card {
+  position: relative;
+  z-index: 1;
+  width: min(1080px, 90vw);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 30px;
+  border: 1px solid #55e7ff82;
+  background: linear-gradient(145deg, #081323f5, #070713f8);
+  box-shadow: 0 20px 70px #000c, inset 0 0 40px #55e7ff14;
+  clip-path: polygon(0 0, 97% 0, 100% 7%, 100% 100%, 3% 100%, 0 93%);
+}
+.casual-card h2 {
+  margin: 14px 0 8px;
+  color: white;
+  font: 40px Consolas, monospace;
+  text-align: center;
+  letter-spacing: -1px;
+  text-shadow: 4px 4px #1c2474;
+}
+.casual-matchup,
+.casual-note {
+  color: #8fa7c9;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.casual-matchup {
+  margin: 0 0 18px;
+  color: #87f7ff;
+}
+.casual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 14px;
+}
+.casual-group {
+  padding: 14px;
+  border: 1px solid #55e7ff26;
+  background: #050b18d4;
+}
+.casual-group strong {
+  display: block;
+  margin-bottom: 10px;
+  color: white;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+}
+.casual-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.casual-options.compact {
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+}
+.casual-options button {
+  min-height: 44px;
+  padding: 9px 8px;
+  color: #dcecff;
+  border: 1px solid #33577a;
+  background: #071225;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .7px;
+  cursor: pointer;
+  text-align: left;
+}
+.casual-options.compact button {
+  text-align: center;
+}
+.casual-options button small {
+  display: block;
+  margin-top: 4px;
+  color: #8295b5;
+  font-size: 8px;
+  letter-spacing: .4px;
+}
+.casual-options button.active {
+  color: white;
+  border-color: #87f7ff;
+  background: linear-gradient(135deg, #10284d, #21155a);
+  box-shadow: 0 0 18px #55e7ff24;
+}
+.casual-start {
+  display: block;
+  width: min(360px, 100%);
+  margin: 20px auto 0;
+  padding: 15px 18px;
+  color: #071322;
+  border: 0;
+  background: linear-gradient(90deg, #87f7ff, #a68cff);
+  font-weight: 1000;
+  letter-spacing: 2px;
+  cursor: pointer;
+}
+
 .online-panel {
   position: absolute;
   z-index: 15;
@@ -1734,7 +1853,8 @@ kbd {
 @media (max-width: 980px), (max-height: 660px) {
   .online-panel,
   .account-panel,
-  .settings-panel {
+  .settings-panel,
+  .casual-panel {
     place-items: start center;
     overflow-y: auto;
     padding: 16px;
@@ -1742,7 +1862,8 @@ kbd {
   .online-card,
   .lobby-card,
   .account-card,
-  .settings-card {
+  .settings-card,
+  .casual-card {
     width: min(960px, calc(100vw - 28px));
     max-height: none;
     padding: 18px;
@@ -1750,7 +1871,8 @@ kbd {
   }
   .online-card h2,
   .account-card h2,
-  .settings-card h2 {
+  .settings-card h2,
+  .casual-card h2 {
     margin: 8px 0 18px;
     font-size: clamp(24px, 8vw, 38px);
     letter-spacing: -1px;
@@ -1797,6 +1919,12 @@ kbd {
   }
   .match-settings {
     grid-template-columns: 1fr;
+  }
+  .casual-grid {
+    grid-template-columns: 1fr;
+  }
+  .casual-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .chat-panel {
     min-height: 130px;
@@ -1845,20 +1973,23 @@ kbd {
 @media (max-width: 560px) {
   .online-panel,
   .account-panel,
-  .settings-panel {
+  .settings-panel,
+  .casual-panel {
     padding: 10px;
   }
   .online-card,
   .lobby-card,
   .account-card,
-  .settings-card {
+  .settings-card,
+  .casual-card {
     width: calc(100vw - 16px);
     padding: 12px;
   }
   .account-profile,
   .account-actions,
   .account-stats,
-  .settings-row {
+  .settings-row,
+  .casual-options {
     grid-template-columns: 1fr;
   }
   .account-avatar {
