@@ -286,6 +286,7 @@
       <div class="character-roster">
         <button class="character-card active" data-character="gojo">
           <div class="pixel-portrait gojo-pixel">
+            <canvas class="gameplay-preview card-preview" data-preview-character="gojo" data-preview-kind="card" width="220" height="260" aria-hidden="true"></canvas>
             <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
           </div>
           <span>LIMITLESS</span>
@@ -294,6 +295,7 @@
         </button>
         <button class="character-card" data-character="sukuna">
           <div class="pixel-portrait sukuna-pixel">
+            <canvas class="gameplay-preview card-preview" data-preview-character="sukuna" data-preview-kind="card" width="220" height="260" aria-hidden="true"></canvas>
             <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
           </div>
           <span>KING OF CURSES</span>
@@ -302,6 +304,7 @@
         </button>
         <button class="character-card" data-character="hakari">
           <div class="pixel-portrait hakari-pixel">
+            <canvas class="gameplay-preview card-preview" data-preview-character="hakari" data-preview-kind="card" width="220" height="260" aria-hidden="true"></canvas>
             <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
           </div>
           <span>FEVER</span>
@@ -310,6 +313,7 @@
         </button>
         <button class="character-card" data-character="higuruma">
           <div class="pixel-portrait higuruma-pixel">
+            <canvas class="gameplay-preview card-preview" data-preview-character="higuruma" data-preview-kind="card" width="220" height="260" aria-hidden="true"></canvas>
             <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
           </div>
           <span>DEADLY LAWYER</span>
@@ -344,9 +348,9 @@
 
     <section id="onlineIntro" class="online-intro hidden">
       <div class="intro-dialogue" id="introDialogue">THE STRONGEST ENTERS THE BARRIER</div>
-      <div class="intro-fighter intro-p1"><div id="introPortraitP1" class="intro-silhouette gojo"></div><span id="introP1">PLAYER 1</span><small id="introCharacterP1">SATORU GOJO</small></div>
+      <div class="intro-fighter intro-p1"><canvas id="introPortraitP1" class="intro-silhouette gameplay-preview intro-preview gojo" data-preview-character="gojo" data-preview-kind="intro" width="360" height="390" aria-hidden="true"></canvas><span id="introP1">PLAYER 1</span><small id="introCharacterP1">SATORU GOJO</small></div>
       <div class="intro-vs">VS</div>
-      <div class="intro-fighter intro-p2"><div id="introPortraitP2" class="intro-silhouette curse"></div><span id="introP2">PLAYER 2</span><small id="introCharacterP2">CURSED SPIRIT</small></div>
+      <div class="intro-fighter intro-p2"><canvas id="introPortraitP2" class="intro-silhouette gameplay-preview intro-preview gojo" data-preview-character="gojo" data-preview-kind="intro" data-preview-facing="-1" width="360" height="390" aria-hidden="true"></canvas><span id="introP2">PLAYER 2</span><small id="introCharacterP2">CURSED SPIRIT</small></div>
       <strong id="fightCountdown">3</strong>
       <small id="loadingStatus">SYNCHRONIZING CURSED ENERGY</small>
     </section>
@@ -354,7 +358,7 @@
     <section id="hud" class="hidden">
       <div class="top-hud">
         <div class="fighter-card player-card">
-          <div id="playerPortrait" class="portrait gojo-portrait"><span>VI</span></div>
+          <div id="playerPortrait" class="portrait gojo-portrait"><canvas class="gameplay-preview hud-preview" data-preview-character="gojo" data-preview-kind="hud" width="96" height="96" aria-hidden="true"></canvas><span>VI</span></div>
           <div class="bars">
             <div class="name-row"><strong id="playerName">SATORU GOJO</strong><span id="playerState">THE STRONGEST</span></div>
             <div class="health-track"><i id="playerHealth"></i><b id="playerLag"></b></div>
@@ -372,7 +376,7 @@
             <div class="health-track"><i id="enemyHealth"></i><b id="enemyLag"></b></div>
             <div class="energy-track enemy-energy"><i id="enemyEnergy"></i></div>
           </div>
-          <div id="enemyPortrait" class="portrait curse-portrait"><span>CR</span></div>
+          <div id="enemyPortrait" class="portrait curse-portrait"><canvas class="gameplay-preview hud-preview" data-preview-character="gojo" data-preview-kind="hud" data-preview-facing="-1" width="96" height="96" aria-hidden="true"></canvas><span>CR</span></div>
         </div>
       </div>
       <div id="combo" class="combo"><strong>0</strong><span>HITS</span></div>
