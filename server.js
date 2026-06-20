@@ -9,17 +9,18 @@ const { AuthoritativeMatch, TICK_MS } = require("./authoritative-match");
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
-const LEGACY_DATA_DIR = path.join(ROOT, "data");
 const DATA_DIR = process.env.VOID_LIMIT_DATA_DIR
   ? path.resolve(process.env.VOID_LIMIT_DATA_DIR)
-  : path.join(ROOT, "..", "void-limit-account-data");
+  : defaultDataDir();
+const BACKUPS_DIR = path.join(DATA_DIR, "backups");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
-const LEGACY_USERS_FILE = path.join(LEGACY_DATA_DIR, "users.json");
-const LEGACY_SESSIONS_FILE = path.join(LEGACY_DATA_DIR, "sessions.json");
+const MIGRATIONS_FILE = path.join(DATA_DIR, "migrations.json");
+const ACCOUNT_SECRET_FILE = path.join(DATA_DIR, "account-secret.txt");
 const DEFAULT_GOOGLE_CLIENT_ID = "985537852640-mj77hcjhvvpj0at4bmthoek3afbk88og.apps.googleusercontent.com";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
-const SESSION_SECRET = process.env.SESSION_SECRET || "void-limit-local-session-secret";
+let SESSION_SECRET = "";
+let dataReady = false;
 const rooms = new Map();
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const MIME = {
@@ -33,6 +34,16 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".json": "application/json; charset=utf-8",
 };
+
+function defaultDataDir() {
+  if (process.platform === "win32") {
+    if (process.env.APPDATA) return path.join(process.env.APPDATA, "VoidLimit", "account-data");
+    const base = process.env.USERPROFILE || process.env.HOME || ROOT;
+    return path.join(base, "Documents", "VoidLimit", "account-data");
+  }
+  const home = process.env.HOME || ROOT;
+  return path.join(home, ".void-limit", "account-data");
+}
 
 function roomCode() {
   let code;
@@ -72,26 +83,221 @@ function safeUrl(value) {
   }
 }
 
-function ensureDataFiles() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(USERS_FILE) && fs.existsSync(LEGACY_USERS_FILE)) fs.copyFileSync(LEGACY_USERS_FILE, USERS_FILE);
-  if (!fs.existsSync(SESSIONS_FILE) && fs.existsSync(LEGACY_SESSIONS_FILE)) fs.copyFileSync(LEGACY_SESSIONS_FILE, SESSIONS_FILE);
-  if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({ users: {} }, null, 2));
-  if (!fs.existsSync(SESSIONS_FILE)) fs.writeFileSync(SESSIONS_FILE, JSON.stringify({ sessions: {} }, null, 2));
+function stamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-function readJson(file, fallback) {
+function writeJsonFile(file, data, options = {}) {
+  const backup = options.backup !== false;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (backup) backupExistingFile(file);
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
+  fs.renameSync(tmp, file);
+}
+
+function backupExistingFile(file) {
   try {
-    ensureDataFiles();
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
+    if (!fs.existsSync(file) || fs.statSync(file).size <= 0) return;
+    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    const parsed = path.parse(file);
+    const name = `${parsed.name}-${stamp()}-${crypto.randomBytes(3).toString("hex")}${parsed.ext || ".json"}`;
+    fs.copyFileSync(file, path.join(BACKUPS_DIR, name));
+  } catch (error) {
+    console.warn(`[account] Could not create backup for ${file}: ${error.message}`);
+  }
+}
+
+function corruptPath(file) {
+  const parsed = path.parse(file);
+  return path.join(parsed.dir, `${parsed.name}.corrupt-${stamp()}${parsed.ext || ".json"}`);
+}
+
+function readJsonFile(file, fallback, createClean = false) {
+  if (!fs.existsSync(file)) return fallback;
+  try {
+    const text = fs.readFileSync(file, "utf8").trim();
+    if (!text) return fallback;
+    return JSON.parse(text);
+  } catch (error) {
+    const target = corruptPath(file);
+    try {
+      fs.renameSync(file, target);
+      console.warn(`[account] Corrupt JSON moved to ${target}`);
+    } catch (renameError) {
+      console.warn(`[account] Corrupt JSON in ${file}; could not rename it: ${renameError.message}`);
+    }
+    if (createClean) writeJsonFile(file, fallback, { backup: false });
     return fallback;
   }
 }
 
+function fileHash(file) {
+  return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function samePath(a, b) {
+  return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+}
+
+function legacyAccountFiles() {
+  const parent = path.join(ROOT, "..");
+  const candidates = [
+    path.join(ROOT, "data", "users.json"),
+    path.join(ROOT, "data", "sessions.json"),
+    path.join(ROOT, "void-limit-account-data", "users.json"),
+    path.join(ROOT, "void-limit-account-data", "sessions.json"),
+    path.join(parent, "void-limit-account-data", "users.json"),
+    path.join(parent, "void-limit-account-data", "sessions.json"),
+    path.join(ROOT, "outputs", "void-limit-account-data", "users.json"),
+    path.join(ROOT, "outputs", "void-limit-account-data", "sessions.json"),
+    path.join(parent, "outputs", "void-limit-account-data", "users.json"),
+    path.join(parent, "outputs", "void-limit-account-data", "sessions.json"),
+  ];
+  const seen = new Set();
+  return candidates.filter((file) => {
+    const key = path.resolve(file).toLowerCase();
+    if (seen.has(key) || samePath(file, USERS_FILE) || samePath(file, SESSIONS_FILE)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeUsersMap(data) {
+  if (data?.users && typeof data.users === "object") return data.users;
+  if (data?.googleSub) return { [data.googleSub]: data };
+  return {};
+}
+
+function mergeUsersData(target, incoming, sourceMtime = 0) {
+  target.users = target.users && typeof target.users === "object" ? target.users : {};
+  const incomingUsers = normalizeUsersMap(incoming);
+  for (const [rawSub, rawUser] of Object.entries(incomingUsers)) {
+    const sourceUser = rawUser && typeof rawUser === "object" ? rawUser : {};
+    const googleSub = safeText(sourceUser.googleSub || rawSub, "", 160);
+    if (!googleSub) continue;
+    const existing = ensureProgressShape(target.users[googleSub] || {
+      googleSub,
+      createdAt: sourceUser.createdAt || new Date(sourceMtime || Date.now()).toISOString(),
+      stats: defaultStats(),
+      unlocks: defaultUnlocks(),
+      settings: defaultSettings(),
+    });
+    const incomingUser = ensureProgressShape({ ...sourceUser, googleSub });
+    mergeProgress(existing, {
+      stats: incomingUser.stats,
+      unlocks: incomingUser.unlocks,
+      settings: incomingUser.settings,
+    });
+    existing.displayName = safeText(incomingUser.displayName, existing.displayName || "Void Fighter", 80);
+    existing.email = safeText(incomingUser.email, existing.email || "", 160);
+    existing.picture = safeUrl(incomingUser.picture) || existing.picture || "";
+    existing.createdAt = existing.createdAt || incomingUser.createdAt || new Date(sourceMtime || Date.now()).toISOString();
+    existing.lastLogin = latestIso(existing.lastLogin, incomingUser.lastLogin, sourceMtime);
+    target.users[googleSub] = existing;
+  }
+  return target;
+}
+
+function latestIso(current, incoming, mtime = 0) {
+  const currentTime = Date.parse(current || "") || 0;
+  const incomingTime = Date.parse(incoming || "") || mtime || 0;
+  const best = Math.max(currentTime, incomingTime);
+  return best ? new Date(best).toISOString() : new Date().toISOString();
+}
+
+function mergeSessionsData(target, incoming) {
+  target.sessions = target.sessions && typeof target.sessions === "object" ? target.sessions : {};
+  const incomingSessions = incoming?.sessions && typeof incoming.sessions === "object" ? incoming.sessions : {};
+  for (const [rawId, session] of Object.entries(incomingSessions)) {
+    const id = safeText(rawId, "", 120);
+    const googleSub = safeText(session?.googleSub, "", 160);
+    if (!id || !googleSub) continue;
+    const current = target.sessions[id];
+    if (!current || cleanNumber(session.lastSeen) >= cleanNumber(current.lastSeen)) {
+      target.sessions[id] = {
+        googleSub,
+        createdAt: cleanNumber(session.createdAt) || Date.now(),
+        lastSeen: cleanNumber(session.lastSeen) || Date.now(),
+      };
+    }
+  }
+  return target;
+}
+
+function migrateOldSaves() {
+  const migrations = readJsonFile(MIGRATIONS_FILE, { sources: {} }, true);
+  migrations.sources = migrations.sources && typeof migrations.sources === "object" ? migrations.sources : {};
+  let users = readJsonFile(USERS_FILE, { users: {} }, true);
+  let sessions = readJsonFile(SESSIONS_FILE, { sessions: {} }, true);
+  let changedUsers = false;
+  let changedSessions = false;
+  let changedMigrations = false;
+
+  for (const file of legacyAccountFiles()) {
+    if (!fs.existsSync(file)) continue;
+    const stat = fs.statSync(file);
+    if (stat.size <= 0) continue;
+    const hash = fileHash(file);
+    const key = `${path.resolve(file).toLowerCase()}|${hash}`;
+    if (migrations.sources[key]) continue;
+    const data = readJsonFile(file, null, false);
+    if (!data) continue;
+    if (path.basename(file).toLowerCase() === "users.json") {
+      mergeUsersData(users, data, stat.mtimeMs);
+      changedUsers = true;
+    } else if (path.basename(file).toLowerCase() === "sessions.json") {
+      mergeSessionsData(sessions, data);
+      changedSessions = true;
+    }
+    migrations.sources[key] = {
+      path: file,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      hash,
+      migratedAt: new Date().toISOString(),
+    };
+    changedMigrations = true;
+    console.log(`[account] Migrated old save file: ${file}`);
+  }
+
+  if (changedUsers) writeJsonFile(USERS_FILE, users);
+  if (changedSessions) writeJsonFile(SESSIONS_FILE, sessions);
+  if (changedMigrations) writeJsonFile(MIGRATIONS_FILE, migrations);
+}
+
+function loadSessionSecret() {
+  const envSecret = String(process.env.SESSION_SECRET || "").trim();
+  if (envSecret) return envSecret;
+  if (fs.existsSync(ACCOUNT_SECRET_FILE)) {
+    const saved = fs.readFileSync(ACCOUNT_SECRET_FILE, "utf8").trim();
+    if (saved) return saved;
+  }
+  const generated = crypto.randomBytes(32).toString("base64url");
+  fs.writeFileSync(`${ACCOUNT_SECRET_FILE}.tmp`, `${generated}\n`);
+  fs.renameSync(`${ACCOUNT_SECRET_FILE}.tmp`, ACCOUNT_SECRET_FILE);
+  return generated;
+}
+
+function ensureDataFiles() {
+  if (dataReady) return;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+  if (!fs.existsSync(USERS_FILE)) writeJsonFile(USERS_FILE, { users: {} }, { backup: false });
+  if (!fs.existsSync(SESSIONS_FILE)) writeJsonFile(SESSIONS_FILE, { sessions: {} }, { backup: false });
+  SESSION_SECRET = loadSessionSecret();
+  migrateOldSaves();
+  dataReady = true;
+}
+
+function readJson(file, fallback) {
+  ensureDataFiles();
+  return readJsonFile(file, fallback, true);
+}
+
 function writeJson(file, data) {
   ensureDataFiles();
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  writeJsonFile(file, data);
 }
 
 function defaultStats() {
@@ -314,6 +520,19 @@ async function handleApi(req, res) {
   if (req.method === "OPTIONS") return sendJson(res, 204, {});
   if (req.method === "GET" && pathname === "/api/config") {
     return sendJson(res, 200, { googleClientId: publicGoogleClientId() });
+  }
+  if (req.method === "GET" && pathname === "/api/account-debug") {
+    ensureDataFiles();
+    const users = readJson(USERS_FILE, { users: {} });
+    const auth = currentUser(req);
+    return sendJson(res, 200, {
+      ok: true,
+      dataDir: DATA_DIR,
+      usersFileExists: fs.existsSync(USERS_FILE),
+      sessionsFileExists: fs.existsSync(SESSIONS_FILE),
+      userCount: Object.keys(users.users || {}).length,
+      currentUserSignedIn: Boolean(auth),
+    });
   }
   if (req.method === "GET" && pathname === "/api/me") {
     const auth = currentUser(req);
@@ -777,6 +996,8 @@ function websocketClient(socket) {
   return client;
 }
 
+ensureDataFiles();
+
 const server = http.createServer((req, res) => {
   if ((req.url || "/").split("?")[0].startsWith("/api/")) {
     handleApi(req, res).catch(() => sendJson(res, 500, { ok: false, error: "Server error" }));
@@ -838,5 +1059,6 @@ setInterval(() => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Void Limit Online running at http://localhost:${PORT}`);
+  console.log(`Account saves: ${DATA_DIR}`);
   console.log("Share this computer's local IP address and room code with Player 2.");
 });
