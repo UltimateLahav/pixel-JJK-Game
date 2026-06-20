@@ -89,6 +89,7 @@
     accountName: $("#accountName"),
     accountEmail: $("#accountEmail"),
     accountStatus: $("#accountStatus"),
+    accountSaveConnection: $("#accountSaveConnection"),
     accountMode: $("#accountMode"),
     accountStats: $("#accountStats"),
     accountSignOut: $("#accountSignOut"),
@@ -5098,6 +5099,32 @@
     ui.accountStatus.classList.toggle("ok", kind === "ok");
   }
 
+  function setAccountSaveConnection(message, kind = "") {
+    if (!ui.accountSaveConnection) return;
+    ui.accountSaveConnection.textContent = message;
+    ui.accountSaveConnection.classList.toggle("error", kind === "error");
+    ui.accountSaveConnection.classList.toggle("ok", kind === "ok");
+  }
+
+  async function refreshAccountDebug() {
+    if (!SERVER_ACCOUNTS_AVAILABLE) {
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
+      return null;
+    }
+    try {
+      const data = await accountRequest("/api/account-debug");
+      if (data.usersFileExists && data.sessionsFileExists) {
+        setAccountSaveConnection(`Save folder connected: ${data.userCount || 0} account${data.userCount === 1 ? "" : "s"}.`, "ok");
+      } else {
+        setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
+      }
+      return data;
+    } catch {
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
+      return null;
+    }
+  }
+
   function updateGoogleOriginHelp() {
     if (!ui.googleOriginHelp) return;
     if (!SERVER_ACCOUNTS_AVAILABLE) {
@@ -5185,6 +5212,7 @@
       window.dispatchEvent(new CustomEvent("voidlimit:accountUpdated", { detail: { user: accountState.user } }));
     } catch (error) {
       setAccountStatus(error.message || "Login failed, continue as guest", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
   }
 
@@ -5194,6 +5222,7 @@
     accountState.isGuest = true;
     accountState.progress = loadGuestProgress();
     setAccountStatus("Signed out. Guest mode is active.");
+    refreshAccountDebug();
     updateAccountUi();
     window.dispatchEvent(new CustomEvent("voidlimit:accountUpdated", { detail: { user: null } }));
   }
@@ -5204,6 +5233,7 @@
       accountState.user = null;
       accountState.isGuest = true;
       setAccountStatus("Run start-online.bat, then open http://localhost:4173 to sign in or sign up. Guest Mode works here.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
       updateAccountUi();
       return accountState.progress;
     }
@@ -5217,6 +5247,7 @@
         setOnlineDefaultName(data.user.displayName || "");
         await accountMergeGuestProgress();
         setAccountStatus("Signed in. Progress loaded.", "ok");
+        refreshAccountDebug();
       } else {
         accountState.user = null;
         accountState.isGuest = true;
@@ -5226,11 +5257,13 @@
             : "Google login is not configured. Guest Mode is still available.",
           googleClientId ? "ok" : "error",
         );
+        refreshAccountDebug();
       }
     } catch {
       accountState.user = null;
       accountState.isGuest = true;
       setAccountStatus("Google login unavailable. Guest mode is active.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
     updateAccountUi();
     return accountState.progress;
@@ -5243,6 +5276,7 @@
       saveGuestProgress(accountState.progress);
       syncLocalUnlocks(accountState.progress);
       setAccountStatus("Guest progress saved locally.", "ok");
+      setAccountSaveConnection(SERVER_ACCOUNTS_AVAILABLE ? "Save folder connected. Sign in to cloud-sync this progress." : "Cloud save unavailable, local save kept.", SERVER_ACCOUNTS_AVAILABLE ? "ok" : "error");
       updateAccountUi();
       return accountState.progress;
     }
@@ -5254,10 +5288,12 @@
       accountState.progress = progressFromProfile(data.user);
       syncLocalUnlocks(accountState.progress);
       setAccountStatus("Progress saved.", "ok");
+      refreshAccountDebug();
     } catch {
       const guest = mergeProgress(loadGuestProgress(), cleanDelta);
       saveGuestProgress(guest);
       setAccountStatus("Cloud save failed, local save kept.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
     updateAccountUi();
     return accountState.progress;
@@ -5283,8 +5319,10 @@
       syncLocalUnlocks(accountState.progress);
       localStorage.setItem(mergeKey, signature);
       localStorage.removeItem(GUEST_PROGRESS_KEY);
+      refreshAccountDebug();
     } catch {
       setAccountStatus("Cloud merge failed, guest save kept locally.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
   }
 
@@ -5342,8 +5380,12 @@
     updateAccountUi();
     if (!SERVER_ACCOUNTS_AVAILABLE) {
       setAccountStatus("Run start-online.bat, then open http://localhost:4173 to sign in or sign up. Guest Mode works here.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     } else if (!googleClientId) {
       setAccountStatus("Google login is not configured. Guest Mode is still available.", "error");
+      refreshAccountDebug();
+    } else {
+      refreshAccountDebug();
     }
   }
 
