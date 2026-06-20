@@ -2,7 +2,7 @@
   "use strict";
 
   const canvas = document.querySelector("#game");
-  const ctx = canvas.getContext("2d");
+  let ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
 
   const $ = (selector) => document.querySelector(selector);
@@ -1034,6 +1034,185 @@
     return selectedMode === "domainUse" || selectedMode === "casuals";
   }
 
+  function previewAccent(character) {
+    if (character === "sukuna") return "#ff426d";
+    if (character === "hakari") return "#62f08f";
+    if (character === "higuruma") return "#f2cf74";
+    if (character === "curse") return "#ff6489";
+    return "#55e7ff";
+  }
+
+  function ensureCanvasPreview(host, className, width, height, afterNode = null) {
+    if (!host) return null;
+    let preview = host.querySelector(`canvas.${className}`);
+    if (!preview) {
+      preview = document.createElement("canvas");
+      preview.className = `gameplay-preview ${className}`;
+      preview.width = width;
+      preview.height = height;
+      preview.setAttribute("aria-hidden", "true");
+      if (afterNode?.parentElement === host) afterNode.after(preview);
+      else host.prepend(preview);
+    }
+    return preview;
+  }
+
+  function syncCharacterCardPreviews() {
+    $$(".character-card").forEach((card) => {
+      const character = card.dataset.character || "gojo";
+      const host = card.querySelector(".pixel-portrait");
+      const preview = ensureCanvasPreview(host, "card-preview", 220, 260);
+      if (!preview) return;
+      preview.dataset.previewCharacter = characters[character] ? character : "curse";
+      preview.dataset.previewKind = "card";
+      preview.dataset.previewFacing = "1";
+      preview.dataset.previewState = card.classList.contains("active") ? "run" : "idle";
+    });
+  }
+
+  function syncSelectionPlayerPreviews() {
+    [ui.selectionP1, ui.selectionP2].forEach((panel, index) => {
+      if (!panel) return;
+      const label = panel.querySelector("span");
+      const preview = ensureCanvasPreview(panel, "selection-preview", 92, 92, label);
+      if (!preview) return;
+      const character = panel.dataset.character || "";
+      const hasCharacter = Boolean(characters[character]);
+      preview.dataset.previewCharacter = hasCharacter ? character : "curse";
+      preview.dataset.previewKind = "selection";
+      preview.dataset.previewFacing = index === 0 ? "1" : "-1";
+      preview.dataset.previewState = hasCharacter && panel.classList.contains("locked") ? "idle" : "run";
+      preview.classList.toggle("empty", !hasCharacter);
+    });
+  }
+
+  function setIntroFighterPreview(element, character, variant = "normal", facing = 1) {
+    if (!element) return;
+    const previewCharacter = characters[character] ? character : "curse";
+    element.className = `intro-silhouette gameplay-preview intro-preview ${previewCharacter}${variant === "inverted" ? " inverted" : ""}`;
+    element.dataset.previewCharacter = previewCharacter;
+    element.dataset.previewKind = "intro";
+    element.dataset.previewVariant = variant === "inverted" ? "inverted" : "normal";
+    element.dataset.previewFacing = String(facing);
+    element.dataset.previewState = "run";
+  }
+
+  function syncHudPreview(element, entity, fallback = "curse", facing = 1) {
+    if (!element) return;
+    const preview = ensureCanvasPreview(element, "hud-preview", 96, 96);
+    if (!preview) return;
+    const character = entity?.character && characters[entity.character] ? entity.character : fallback;
+    preview.dataset.previewCharacter = character;
+    preview.dataset.previewKind = "hud";
+    preview.dataset.previewVariant = entity?.onlineVariant === "inverted" ? "inverted" : "normal";
+    preview.dataset.previewFacing = String(facing);
+    preview.dataset.previewBurned = entity?.burned || entity?.burnout > 0 ? "true" : "false";
+    preview.dataset.previewState = entity?.state === "run" ? "run" : "idle";
+  }
+
+  function previewEntity(character, options = {}) {
+    const facing = Number(options.facing) || 1;
+    const state = options.state || "idle";
+    const common = {
+      kind: "preview",
+      character,
+      onlineVariant: options.variant === "inverted" ? "inverted" : "normal",
+      x: 0,
+      y: 0,
+      w: 44,
+      h: 92,
+      vx: state === "run" ? 190 * facing : 0,
+      vy: 0,
+      facing,
+      health: 600,
+      maxHealth: 600,
+      lagHealth: 600,
+      energy: 70,
+      grounded: true,
+      state,
+      stateTime: performance.now() * .001,
+      attack: null,
+      stun: 0,
+      invuln: 0,
+      flash: 0,
+      blocking: false,
+      reaction: "idle",
+      wallSplat: 0,
+      awakening: 0,
+      burnout: 0,
+      burned: options.burned === "true",
+      moveConfiscation: 0,
+      executionSword: 0,
+      executionSwordUsed: false,
+      executionRecovery: 0,
+      heat: character === "hakari" ? 64 : 0,
+      jackpot: 0,
+      charging: false,
+      techniqueCharge: null,
+      comboStep: -1,
+      airComboStep: -1,
+      type: { name: "CURSED SPIRIT", rank: "GRADE 1", color: "#54214a", accent: "#ff6489", boss: false },
+    };
+    if (character === "sukuna") common.awakening = .01;
+    if (character === "higuruma") common.techniqueCharge = { elapsed: .7 };
+    return common;
+  }
+
+  function renderFighterPreview(preview) {
+    if (!preview || !preview.isConnected || preview.offsetParent === null) return;
+    const previewCtx = preview.getContext("2d");
+    if (!previewCtx) return;
+    const character = preview.dataset.previewCharacter || "gojo";
+    const kind = preview.dataset.previewKind || "card";
+    const accent = previewAccent(character);
+    const oldCtx = ctx;
+    ctx = previewCtx;
+    previewCtx.save();
+    try {
+      previewCtx.setTransform(1, 0, 0, 1, 0, 0);
+      previewCtx.imageSmoothingEnabled = false;
+      previewCtx.clearRect(0, 0, preview.width, preview.height);
+      const glow = previewCtx.createRadialGradient(preview.width * .5, preview.height * .55, 4, preview.width * .5, preview.height * .55, preview.width * .48);
+      glow.addColorStop(0, `${accent}44`);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      previewCtx.fillStyle = glow;
+      previewCtx.fillRect(0, 0, preview.width, preview.height);
+      previewCtx.fillStyle = "#050914aa";
+      previewCtx.fillRect(0, preview.height - Math.max(12, preview.height * .1), preview.width, Math.max(12, preview.height * .1));
+      previewCtx.strokeStyle = `${accent}88`;
+      previewCtx.lineWidth = Math.max(1, preview.width / 90);
+      previewCtx.beginPath();
+      previewCtx.moveTo(preview.width * .18, preview.height * .86);
+      previewCtx.lineTo(preview.width * .82, preview.height * .86);
+      previewCtx.stroke();
+      const scale = kind === "intro" ? 1.95 : kind === "card" ? 1.48 : kind === "selection" ? .62 : .48;
+      const ground = kind === "intro" ? preview.height - 36 : kind === "card" ? preview.height - 24 : preview.height - 12;
+      previewCtx.translate(preview.width / 2, ground);
+      previewCtx.scale(scale, scale);
+      const entity = previewEntity(character, {
+        facing: Number(preview.dataset.previewFacing) || 1,
+        variant: preview.dataset.previewVariant,
+        state: preview.dataset.previewState,
+        burned: preview.dataset.previewBurned,
+      });
+      if (character === "curse") drawCurse(entity);
+      else drawFighter(entity);
+    } finally {
+      previewCtx.restore();
+      ctx = oldCtx;
+      ctx.imageSmoothingEnabled = false;
+    }
+  }
+
+  function renderGameplayPreviews() {
+    if (
+      ui.characterSelect?.classList.contains("hidden")
+      && ui.intro?.classList.contains("hidden")
+      && ui.hud?.classList.contains("hidden")
+    ) return;
+    $$(".gameplay-preview").forEach(renderFighterPreview);
+  }
+
   function renderCharacterSelection() {
     ensureCharacterRoster();
     const profile = characters[selectedCharacter];
@@ -1045,6 +1224,8 @@
       .map(([key, name]) => `<span><kbd>${key}</kbd> ${name}</span>`)
       .join("");
     updateOfflineSelectionCopy();
+    syncCharacterCardPreviews();
+    syncSelectionPlayerPreviews();
   }
 
   function updateOfflineSelectionCopy() {
@@ -1145,6 +1326,7 @@
     roster.insertAdjacentHTML("beforeend", `
         <button class="character-card" data-character="higuruma">
           <div class="pixel-portrait higuruma-pixel">
+            <canvas class="gameplay-preview card-preview" data-preview-character="higuruma" data-preview-kind="card" width="220" height="260" aria-hidden="true"></canvas>
             <i class="portrait-aura"></i><i class="portrait-body"></i><i class="portrait-head"></i><i class="portrait-hair"></i><i class="portrait-face"></i>
           </div>
           <span>DEADLY LAWYER</span>
@@ -1242,8 +1424,8 @@
     ui.introP2.textContent = p2Name || "PLAYER 2";
     ui.introCharacterP1.textContent = characters[p1Character]?.name || "CURSED SPIRIT";
     ui.introCharacterP2.textContent = characters[p2Character]?.name || "CURSED SPIRIT";
-    ui.introPortraitP1.className = `intro-silhouette ${p1Character || "curse"}${p1Variant === "inverted" ? " inverted" : ""}`;
-    ui.introPortraitP2.className = `intro-silhouette ${p2Character || "curse"}${p2Variant === "inverted" ? " inverted" : ""}`;
+    setIntroFighterPreview(ui.introPortraitP1, p1Character || "curse", p1Variant, 1);
+    setIntroFighterPreview(ui.introPortraitP2, p2Character || "curse", p2Variant, -1);
     ui.introDialogue.textContent = matchupDialogue(options.localCharacter, options.remoteCharacter);
   }
 
@@ -6012,6 +6194,7 @@
     const playerMark = p.character === "sukuna" ? "SK" : p.character === "hakari" ? "HK" : p.character === "higuruma" ? "HG" : "VI";
     ui.playerPortrait.className = `portrait ${playerPortrait}`;
     ui.playerPortrait.querySelector("span").textContent = playerMark;
+    syncHudPreview(ui.playerPortrait, p, "gojo", 1);
     ui.enemyName.textContent = isSurvivalMode()
       ? `SURVIVAL CURSES ${survivalLiving.length}/${survivalEnemyLimit(game.wave)}`
       : game.mode === "domainUse" || game.mode === "casuals"
@@ -6028,6 +6211,7 @@
     const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : e.character === "higuruma" ? "HG" : "VI";
     ui.enemyPortrait.className = `portrait ${game.online.active || game.mode === "domainUse" || game.mode === "casuals" ? enemyPortrait : "curse-portrait"}`;
     ui.enemyPortrait.querySelector("span").textContent = game.online.active || game.mode === "domainUse" || game.mode === "casuals" ? enemyMark : "CR";
+    syncHudPreview(ui.enemyPortrait, e, game.online.active || game.mode === "domainUse" || game.mode === "casuals" ? "gojo" : "curse", -1);
     const normalPlayerState = game.online.active
       ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.burned ? " / BURNED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
       : p.awakening > 0
@@ -8140,6 +8324,7 @@
       update(dt);
     }
     draw();
+    renderGameplayPreviews();
     pressed.clear();
     requestAnimationFrame(frame);
   }
