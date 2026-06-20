@@ -748,6 +748,7 @@
       nextM1Fast: false,
       rewindWindow: 0, rewindX: 0, rewindY: 0, rewindHealth: 600,
       jackpotFinisher: false,
+      domainsUsed: 0,
       dismantleUses: 0, cleaveUses: 0, sukunaDomainUses: 0, worldSlashUnlocked: false,
       worldSlashUses: 0,
       charging: false, chargeRecovery: 0, chargeCooldown: 0, chargePulse: 0,
@@ -1325,6 +1326,7 @@
   }
 
   function quitToMenu() {
+    recordSurvivalWaveCheckpoint();
     stopHakariJackpotMusic();
     game.state = "menu";
     ui.hud.classList.add("hidden");
@@ -2077,10 +2079,12 @@
     const p = game.player;
     if (!p || p.character !== "higuruma") return;
     if (game.online.active && game.online.authoritative) {
-      if (p.energy < 100 || p.cooldowns.domain > 0 || p.moveConfiscation > 0) {
+      if (p.moveConfiscation > 0) {
         if (p.moveConfiscation > 0) announce("CONFISCATED");
         return;
       }
+      p.domainsUsed = (p.domainsUsed || 0) + 1;
+      game.online.stats.domains++;
       p.trialStartup = 2;
       p.trialStartupHealth = p.health;
       p.vx = 0;
@@ -2111,6 +2115,7 @@
       noise(.18, .4);
       return;
     }
+    p.domainsUsed = (p.domainsUsed || 0) + 1;
     p.trialStartup = 2;
     p.trialStartupHealth = p.health;
     p.vx = 0;
@@ -2929,6 +2934,7 @@
       p.sukunaDomainUses++;
       updateWorldSlashUnlock(p);
     }
+    p.domainsUsed = (p.domainsUsed || 0) + 1;
     p.cooldowns.domain = profile.cooldowns.domain;
     p.attack = null;
     p.state = "domain";
@@ -4852,6 +4858,7 @@
       game.outcomePending = false;
       game.projectiles.length = 0;
       announce(`WAVE ${game.wave} - ${survivalEnemyLimit(game.wave)} CURSES`);
+      recordSurvivalWaveCheckpoint();
       return true;
     }
     return false;
@@ -5284,7 +5291,7 @@
   function matchProgressDelta(won, draw) {
     const stats = game.mode === "online" ? getOnlineStats() : {
       blackFlashes: game.player?.blackFlashes || 0,
-      domains: game.player?.domainUsed ? 1 : 0,
+      domains: game.player?.domainsUsed || 0,
     };
     const delta = blankAccountProgress();
     delta.stats.totalWins = won && !draw ? 1 : 0;
@@ -5307,6 +5314,24 @@
 
   function recordMatchProgress(won, draw) {
     accountSaveProgress(matchProgressDelta(won, draw));
+  }
+
+  function survivalWaveProgressDelta() {
+    const delta = blankAccountProgress();
+    delta.stats.bestSurvivalWave = Math.max(1, game.wave || 1);
+    delta.unlocks.costumes = unlockedCostumes();
+    delta.settings = {
+      lastCharacter: selectedCharacter,
+      lastStage: selectedStage,
+      lastCostume: selectedCostume,
+      difficulty,
+    };
+    return delta;
+  }
+
+  function recordSurvivalWaveCheckpoint() {
+    if (game.mode !== "survival" || game.online.active || !game.player) return;
+    accountSaveProgress(survivalWaveProgressDelta());
   }
 
   function openAccountPanel() {
