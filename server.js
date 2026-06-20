@@ -470,9 +470,20 @@ function signSessionTokenWith(value, secret) {
   return crypto.createHmac("sha256", secret).update(value).digest("base64url");
 }
 
-function validSessionSignature(id, signature) {
+function sessionSecretsForValidation() {
   const secrets = [SESSION_SECRET, LEGACY_SESSION_SECRET].filter(Boolean);
-  return secrets.some((secret) => signature === signSessionTokenWith(id, secret));
+  for (const file of legacyAccountSecretFiles()) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const saved = fs.readFileSync(file, "utf8").trim();
+      if (saved && !secrets.includes(saved)) secrets.push(saved);
+    } catch {}
+  }
+  return secrets;
+}
+
+function validSessionSignature(id, signature) {
+  return sessionSecretsForValidation().some((secret) => signature === signSessionTokenWith(id, secret));
 }
 
 function sessionCookie(value, maxAge = 60 * 60 * 24 * 30) {
@@ -606,15 +617,16 @@ async function handleApi(req, res) {
   }
   if (req.method === "POST" && pathname === "/api/save-progress") {
     const auth = currentUser(req);
-    if (!auth) return sendJson(res, 401, { ok: false, error: "Login required" });
+    if (!auth) return sendJson(res, 401, { ok: false, error: "Login expired. Sign in again to sync queued progress." });
     try {
       const body = await readBody(req);
       mergeProgress(auth.user, body.progress || {});
       auth.users.users[auth.user.googleSub] = auth.user;
       writeJson(USERS_FILE, auth.users);
       return sendJson(res, 200, { ok: true, user: publicProfile(auth.user), message: "Progress saved" });
-    } catch {
-      return sendJson(res, 400, { ok: false, error: "Cloud save failed, local save kept" });
+    } catch (error) {
+      console.warn(`[account] save-progress failed: ${error.stack || error.message}`);
+      return sendJson(res, 400, { ok: false, error: "Cloud save failed, local save kept", detail: error.message });
     }
   }
   if (req.method === "POST" && pathname === "/api/auth/google") {
