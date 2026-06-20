@@ -1,6 +1,6 @@
 {
   "name": "pixel-jjk-game",
-  "version": "1.5.4",
+  "version": "1.5.8",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
