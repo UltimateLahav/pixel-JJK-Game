@@ -221,7 +221,8 @@ function makePlayer(meta, settings) {
 
 class AuthoritativeMatch {
   constructor({ players, settings, startAt, seed, onSnapshot, onResult }) {
-    this.settings = { time: Number(settings.time) || 99, energy: Number(settings.energy) || 70 };
+    const requestedTime = Number(settings.time);
+    this.settings = { time: requestedTime === 0 ? 0 : requestedTime || 99, energy: Number(settings.energy) || 70 };
     this.startAt = Number(startAt);
     this.seed = Number(seed) || 1;
     this.tick = 0;
@@ -1670,7 +1671,7 @@ class AuthoritativeMatch {
 
   checkResult() {
     if (this.result) return;
-    const remainingTicks = Math.max(0, this.settings.time * TICK_RATE - this.roundTicks);
+    const remainingTicks = this.settings.time > 0 ? Math.max(0, this.settings.time * TICK_RATE - this.roundTicks) : Number.POSITIVE_INFINITY;
     const p1 = this.players[1];
     const p2 = this.players[2];
     if (p1.health > 0 && p2.health > 0 && remainingTicks > 0) return;
@@ -1764,7 +1765,7 @@ class AuthoritativeMatch {
       tick: this.tick,
       serverTime: this.startAt + this.tick * TICK_MS,
       startAt: this.startAt,
-      remainingTicks: Math.max(0, this.settings.time * TICK_RATE - this.roundTicks),
+      remainingTicks: this.settings.time > 0 ? Math.max(0, this.settings.time * TICK_RATE - this.roundTicks) : -1,
       players: { 1: serializePlayer(this.players[1]), 2: serializePlayer(this.players[2]) },
       projectiles: this.projectiles.map((projectile) => ({ ...projectile })),
       clash: this.clash ? { ...this.clash } : null,
