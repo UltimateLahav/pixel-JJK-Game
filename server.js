@@ -9,9 +9,14 @@ const { AuthoritativeMatch, TICK_MS } = require("./authoritative-match");
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, "data");
+const LEGACY_DATA_DIR = path.join(ROOT, "data");
+const DATA_DIR = process.env.VOID_LIMIT_DATA_DIR
+  ? path.resolve(process.env.VOID_LIMIT_DATA_DIR)
+  : path.join(ROOT, "..", "void-limit-account-data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
+const LEGACY_USERS_FILE = path.join(LEGACY_DATA_DIR, "users.json");
+const LEGACY_SESSIONS_FILE = path.join(LEGACY_DATA_DIR, "sessions.json");
 const DEFAULT_GOOGLE_CLIENT_ID = "985537852640-mj77hcjhvvpj0at4bmthoek3afbk88og.apps.googleusercontent.com";
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
 const SESSION_SECRET = process.env.SESSION_SECRET || "void-limit-local-session-secret";
@@ -69,6 +74,8 @@ function safeUrl(value) {
 
 function ensureDataFiles() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(USERS_FILE) && fs.existsSync(LEGACY_USERS_FILE)) fs.copyFileSync(LEGACY_USERS_FILE, USERS_FILE);
+  if (!fs.existsSync(SESSIONS_FILE) && fs.existsSync(LEGACY_SESSIONS_FILE)) fs.copyFileSync(LEGACY_SESSIONS_FILE, SESSIONS_FILE);
   if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, JSON.stringify({ users: {} }, null, 2));
   if (!fs.existsSync(SESSIONS_FILE)) fs.writeFileSync(SESSIONS_FILE, JSON.stringify({ sessions: {} }, null, 2));
 }
@@ -579,7 +586,7 @@ function handleRoomMessage(client, msg) {
     if (["shinjuku", "shibuya", "jujutsuHigh", "kyoto"].includes(msg.map)) room.map = msg.map;
     syncRoom(room);
   } else if (msg.type === "settings" && room.state === "lobby" && isHost) {
-    room.settings.time = [60, 99, 180].includes(Number(msg.time)) ? Number(msg.time) : room.settings.time;
+    room.settings.time = [0, 60, 99, 180].includes(Number(msg.time)) ? Number(msg.time) : room.settings.time;
     room.settings.energy = [50, 70, 100].includes(Number(msg.energy)) ? Number(msg.energy) : room.settings.energy;
     syncRoom(room);
   } else if (msg.type === "chat") {
