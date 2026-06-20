@@ -149,6 +149,8 @@
   let pendingOfflineSelection = false;
   let onlineSelection = false;
   const GUEST_PROGRESS_KEY = "guestProgress";
+  const ACCOUNT_CLOUD_BACKUP_PREFIX = "voidLimitCloudBackup:";
+  const ACCOUNT_PENDING_CLOUD_KEY = "voidLimitPendingCloudProgress";
   const GAME_SETTINGS_KEY = "voidLimitSettings";
   const SERVER_ACCOUNTS_AVAILABLE = location.protocol !== "file:";
   const HAKARI_JACKPOT_DURATION = 33.2;
@@ -5380,6 +5382,83 @@
     return statsTotal > 0 || played || unlocks > 0;
   }
 
+  function accountBackupKey(profile = accountState.user) {
+    const raw = profile?.accountId || profile?.email || profile?.displayName || "signed-account";
+    const safe = String(raw).replace(/[^a-z0-9_.@-]/gi, "_").slice(0, 96);
+    return `${ACCOUNT_CLOUD_BACKUP_PREFIX}${safe}`;
+  }
+
+  function accountBackupKeys(profile = accountState.user) {
+    const raws = [profile?.accountId, profile?.email, profile?.displayName, "signed-account"].filter(Boolean);
+    const out = [];
+    for (const raw of raws) {
+      const safe = String(raw).replace(/[^a-z0-9_.@-]/gi, "_").slice(0, 96);
+      const key = `${ACCOUNT_CLOUD_BACKUP_PREFIX}${safe}`;
+      if (!out.includes(key)) out.push(key);
+    }
+    return out;
+  }
+
+  function loadAccountCloudBackup(profile = accountState.user) {
+    for (const key of accountBackupKeys(profile)) {
+      try {
+        const progress = normalizeProgress(JSON.parse(localStorage.getItem(key) || "{}"));
+        if (progressHasMeaningfulData(progress)) return progress;
+      } catch {}
+    }
+    return blankAccountProgress();
+  }
+
+  function saveAccountCloudBackup(profile = accountState.user, progress = accountState.progress) {
+    if (!profile || !progress) return;
+    for (const key of accountBackupKeys(profile)) {
+      try { localStorage.setItem(key, JSON.stringify(normalizeProgress(progress))); } catch {}
+    }
+  }
+
+  function loadPendingCloudProgress() {
+    try {
+      return normalizeProgress(JSON.parse(localStorage.getItem(ACCOUNT_PENDING_CLOUD_KEY) || "{}"));
+    } catch {
+      return blankAccountProgress();
+    }
+  }
+
+  function savePendingCloudProgress(progress) {
+    try { localStorage.setItem(ACCOUNT_PENDING_CLOUD_KEY, JSON.stringify(normalizeProgress(progress))); } catch {}
+  }
+
+  function clearPendingCloudProgress() {
+    try { localStorage.removeItem(ACCOUNT_PENDING_CLOUD_KEY); } catch {}
+  }
+
+  function queuePendingCloudProgress(delta) {
+    savePendingCloudProgress(mergeProgress(loadPendingCloudProgress(), delta));
+  }
+
+  function missingProgressDelta(serverProgress, backupProgress) {
+    const server = normalizeProgress(serverProgress);
+    const backup = normalizeProgress(backupProgress);
+    const delta = blankAccountProgress();
+    for (const key of ["totalWins", "totalLosses", "bossRushClears", "blackFlashes", "domainsUsed"]) {
+      delta.stats[key] = Math.max(0, accountNumber(backup.stats[key]) - accountNumber(server.stats[key]));
+    }
+    delta.stats.bestSurvivalWave = backup.stats.bestSurvivalWave > server.stats.bestSurvivalWave ? backup.stats.bestSurvivalWave : 0;
+    delta.stats.maxCombo = backup.stats.maxCombo > server.stats.maxCombo ? backup.stats.maxCombo : 0;
+    for (const [character, count] of Object.entries(backup.stats.charactersPlayed || {})) {
+      const missing = accountNumber(count) - accountNumber(server.stats.charactersPlayed?.[character]);
+      if (missing > 0) delta.stats.charactersPlayed[character] = missing;
+    }
+    const serverCostumes = new Set(cleanList(server.unlocks.costumes, ["uniform"]));
+    const serverTitles = new Set(cleanList(server.unlocks.titles));
+    const serverBadges = new Set(cleanList(server.unlocks.badges));
+    delta.unlocks.costumes = cleanList(backup.unlocks.costumes).filter((value) => !serverCostumes.has(value));
+    delta.unlocks.titles = cleanList(backup.unlocks.titles).filter((value) => !serverTitles.has(value));
+    delta.unlocks.badges = cleanList(backup.unlocks.badges).filter((value) => !serverBadges.has(value));
+    delta.settings = { ...backup.settings };
+    return normalizeProgress(delta);
+  }
+
   function guestMergeKey() {
     const profile = accountState.user || {};
     const raw = profile.email || profile.displayName || "google-user";
@@ -5431,7 +5510,7 @@
     }
     try {
       const data = await accountRequest("/api/account-debug");
-      if (data.usersFileExists && data.sessionsFileExists) {
+      if (data.usersFileExists && data.sessionsFileExists && data.canWrite) {
         setAccountSaveConnection(`Save folder connected: ${data.userCount || 0} account${data.userCount === 1 ? "" : "s"}.`, "ok");
       } else {
         setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
@@ -5525,6 +5604,9 @@
       syncLocalUnlocks(accountState.progress);
       setOnlineDefaultName(data.user.displayName || "");
       await accountMergeGuestProgress();
+      await accountFlushPendingCloudProgress();
+      await accountRepairFromCloudBackup();
+      saveAccountCloudBackup(accountState.user, accountState.progress);
       setAccountStatus("Signed in. Progress synced.", "ok");
       updateAccountUi();
       window.dispatchEvent(new CustomEvent("voidlimit:accountUpdated", { detail: { user: accountState.user } }));
@@ -5564,6 +5646,9 @@
         syncLocalUnlocks(accountState.progress);
         setOnlineDefaultName(data.user.displayName || "");
         await accountMergeGuestProgress();
+        await accountFlushPendingCloudProgress();
+        await accountRepairFromCloudBackup();
+        saveAccountCloudBackup(accountState.user, accountState.progress);
         setAccountStatus("Signed in. Progress loaded.", "ok");
         refreshAccountDebug();
       } else {
@@ -5599,22 +5684,74 @@
       return accountState.progress;
     }
     accountState.progress = mergeProgress(accountState.progress, cleanDelta);
+    saveAccountCloudBackup(accountState.user, accountState.progress);
     updateAccountUi();
     try {
       const data = await accountRequest("/api/save-progress", { method: "POST", body: JSON.stringify({ progress: cleanDelta }) });
       accountState.user = data.user;
       accountState.progress = progressFromProfile(data.user);
       syncLocalUnlocks(accountState.progress);
+      saveAccountCloudBackup(accountState.user, accountState.progress);
+      await accountFlushPendingCloudProgress();
       setAccountStatus("Progress saved.", "ok");
       refreshAccountDebug();
     } catch {
       const guest = mergeProgress(loadGuestProgress(), cleanDelta);
       saveGuestProgress(guest);
+      queuePendingCloudProgress(cleanDelta);
       setAccountStatus("Cloud save failed, local save kept.", "error");
       setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
     }
     updateAccountUi();
     return accountState.progress;
+  }
+
+  async function accountFlushPendingCloudProgress() {
+    if (accountState.isGuest || !accountState.user) return false;
+    const pending = loadPendingCloudProgress();
+    if (!progressHasMeaningfulData(pending)) return false;
+    try {
+      const data = await accountRequest("/api/save-progress", { method: "POST", body: JSON.stringify({ progress: pending }) });
+      accountState.user = data.user;
+      accountState.progress = progressFromProfile(data.user);
+      syncLocalUnlocks(accountState.progress);
+      saveAccountCloudBackup(accountState.user, accountState.progress);
+      clearPendingCloudProgress();
+      setAccountStatus("Recovered queued cloud progress.", "ok");
+      refreshAccountDebug();
+      updateAccountUi();
+      return true;
+    } catch {
+      setAccountStatus("Cloud save failed, queued progress kept.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
+      return false;
+    }
+  }
+
+  async function accountRepairFromCloudBackup() {
+    if (accountState.isGuest || !accountState.user) return false;
+    const backup = loadAccountCloudBackup(accountState.user);
+    const delta = missingProgressDelta(accountState.progress, backup);
+    if (!progressHasMeaningfulData(delta)) {
+      saveAccountCloudBackup(accountState.user, accountState.progress);
+      return false;
+    }
+    try {
+      const data = await accountRequest("/api/save-progress", { method: "POST", body: JSON.stringify({ progress: delta }) });
+      accountState.user = data.user;
+      accountState.progress = progressFromProfile(data.user);
+      syncLocalUnlocks(accountState.progress);
+      saveAccountCloudBackup(accountState.user, accountState.progress);
+      setAccountStatus("Recovered account progress from this browser.", "ok");
+      refreshAccountDebug();
+      updateAccountUi();
+      return true;
+    } catch {
+      queuePendingCloudProgress(delta);
+      setAccountStatus("Cloud repair failed, local account backup kept.", "error");
+      setAccountSaveConnection("Cloud save unavailable, local save kept.", "error");
+      return false;
+    }
   }
 
   async function accountMergeGuestProgress() {
@@ -5635,6 +5772,7 @@
       accountState.user = data.user;
       accountState.progress = progressFromProfile(data.user);
       syncLocalUnlocks(accountState.progress);
+      saveAccountCloudBackup(accountState.user, accountState.progress);
       localStorage.setItem(mergeKey, signature);
       localStorage.removeItem(GUEST_PROGRESS_KEY);
       refreshAccountDebug();
