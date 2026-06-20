@@ -24,7 +24,7 @@
         </div>
       </div>
       <div class="mode-grid">
-        <button class="mode active" data-mode="story"><small>01</small><strong>STORY</strong><em>3 encounters</em></button>
+        <button class="mode active" data-mode="casuals"><small>01</small><strong>CASUALS</strong><em>Custom fight</em></button>
         <button class="mode" data-mode="survival"><small>02</small><strong>SURVIVAL</strong><em>Endless curses</em></button>
         <button class="mode" data-mode="domainUse"><small>03</small><strong>DOMAIN USE</strong><em>Enemy domains</em></button>
         <button class="mode" data-mode="training"><small>04</small><strong>TRAINING</strong><em>Frame data on</em></button>
@@ -38,7 +38,7 @@
       <div class="costumes">
         <span>COSTUME</span>
         <button class="active" data-costume="uniform">UNIFORM</button>
-        <button data-costume="snowfall">SNOWFALL <i>STORY</i></button>
+        <button data-costume="snowfall">SNOWFALL <i>CASUAL</i></button>
         <button data-costume="eclipse">ECLIPSE <i>DOMAIN</i></button>
       </div>
       <div class="stage-select">
@@ -55,6 +55,90 @@
       <button id="accountButton" class="account-entry">ACCOUNT <i id="accountButtonMode">GUEST</i></button>
       <button id="settingsButton" class="settings-entry">SETTINGS <i>AUDIO</i></button>
       <p class="menu-note">Keyboard recommended | Audio generated in real time</p>
+    </section>
+
+    <section id="casualPanel" class="casual-panel hidden" aria-label="Void Limit casual battle settings">
+      <button id="casualBack" class="online-back">BACK</button>
+      <div class="casual-card">
+        <div class="eyebrow"><span></span> CUSTOM OFFLINE BATTLE <span></span></div>
+        <h2>CASUALS</h2>
+        <p id="casualMatchup" class="casual-matchup">PLAYER VS ENEMY</p>
+        <div class="casual-grid">
+          <div class="casual-group">
+            <strong>ENEMY AI</strong>
+            <div class="casual-options" data-casual-group="enemyAi">
+              <button class="active" data-value="aggressive">AGGRESSIVE<small>rushes nonstop</small></button>
+              <button data-value="passive">PASSIVE<small>blocks and walks</small></button>
+              <button data-value="zoner">ZONER<small>keeps distance</small></button>
+              <button data-value="counter">COUNTER<small>punishes mistakes</small></button>
+              <button data-value="domainHunter">DOMAIN HUNTER<small>hunts Domain fast</small></button>
+              <button data-value="random">RANDOM MANIAC<small>unpredictable</small></button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>STARTING ENERGY</strong>
+            <div class="casual-options compact" data-casual-group="startingEnergy">
+              <button data-value="0">0%</button>
+              <button data-value="25">25%</button>
+              <button class="active" data-value="50">50%</button>
+              <button data-value="75">75%</button>
+              <button data-value="100">100%</button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>ENEMY DOMAIN</strong>
+            <div class="casual-options" data-casual-group="enemyDomain">
+              <button data-value="off">OFF<small>no Domain</small></button>
+              <button class="active" data-value="normal">NORMAL<small>uses normally</small></button>
+              <button data-value="ready">STARTS READY<small>opens fast</small></button>
+              <button data-value="every30">EVERY 30s<small>recharges timer</small></button>
+              <button data-value="only">ONLY DOMAIN<small>no specials</small></button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>PLAYER DOMAIN</strong>
+            <div class="casual-options" data-casual-group="playerDomain">
+              <button data-value="off">OFF<small>no Domain</small></button>
+              <button class="active" data-value="normal">NORMAL<small>uses normally</small></button>
+              <button data-value="ready">STARTS READY<small>available now</small></button>
+              <button data-value="every30">EVERY 30s<small>refreshes ready</small></button>
+              <button data-value="only">ONLY DOMAIN<small>no specials</small></button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>ENEMY HP</strong>
+            <div class="casual-options compact" data-casual-group="enemyHp">
+              <button data-value="0.25">25%</button><button data-value="0.5">50%</button><button class="active" data-value="1">100%</button><button data-value="1.5">150%</button><button data-value="3">300%</button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>ENEMY DAMAGE</strong>
+            <div class="casual-options compact" data-casual-group="enemyDamage">
+              <button data-value="0.25">25%</button><button data-value="0.5">50%</button><button class="active" data-value="1">100%</button><button data-value="1.5">150%</button><button data-value="3">300%</button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>ENEMY SPEED</strong>
+            <div class="casual-options compact" data-casual-group="enemySpeed">
+              <button data-value="slow">SLOW</button><button class="active" data-value="normal">NORMAL</button><button data-value="fast">FAST</button><button data-value="ultra">ULTRA</button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>KNOCKBACK TAKEN</strong>
+            <div class="casual-options compact" data-casual-group="enemyKnockback">
+              <button data-value="low">LOW</button><button class="active" data-value="normal">NORMAL</button><button data-value="high">HIGH</button>
+            </div>
+          </div>
+          <div class="casual-group">
+            <strong>ENEMY STUN TIME</strong>
+            <div class="casual-options compact" data-casual-group="enemyStun">
+              <button data-value="short">SHORT</button><button class="active" data-value="normal">NORMAL</button><button data-value="long">LONG</button>
+            </div>
+          </div>
+        </div>
+        <button id="casualStart" class="casual-start">START CASUAL</button>
+        <p class="casual-note">Pick the map from the title screen stage selector before starting.</p>
+      </div>
     </section>
 
     <section id="settingsPanel" class="settings-panel hidden" aria-label="Void Limit settings panel">
@@ -278,7 +362,7 @@
           </div>
         </div>
         <div class="round">
-          <span id="modeLabel">STORY</span>
+          <span id="modeLabel">CASUALS</span>
           <strong id="timer">99</strong>
           <small id="waveLabel">ENCOUNTER 1</small>
         </div>
