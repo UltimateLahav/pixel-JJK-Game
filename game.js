@@ -75,6 +75,10 @@
     onlineLobby: $("#onlineLobby"),
     onlineHome: $("#onlineHome"),
     accountPanel: $("#accountPanel"),
+    casualPanel: $("#casualPanel"),
+    casualBack: $("#casualBack"),
+    casualStart: $("#casualStart"),
+    casualMatchup: $("#casualMatchup"),
     accountButton: $("#accountButton"),
     accountButtonMode: $("#accountButtonMode"),
     accountBack: $("#accountBack"),
@@ -121,13 +125,26 @@
   const rectsOverlap = (a, b) =>
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-  let selectedMode = "story";
+  let selectedMode = "casuals";
   let difficulty = "normal";
   let selectedCostume = "uniform";
   let selectedStage = "shinjuku";
   let selectedCharacter = "gojo";
   let selectedDomainEnemy = "sukuna";
   let selectedDomainPlayer = "gojo";
+  let selectedCasualEnemy = "sukuna";
+  let selectedCasualPlayer = "gojo";
+  const casualSettings = {
+    enemyAi: "aggressive",
+    startingEnergy: 50,
+    enemyDomain: "normal",
+    playerDomain: "normal",
+    enemyHp: 1,
+    enemyDamage: 1,
+    enemySpeed: "normal",
+    enemyKnockback: "normal",
+    enemyStun: "normal",
+  };
   let offlineSelectionStep = "player";
   let pendingOfflineSelection = false;
   let onlineSelection = false;
@@ -167,7 +184,7 @@
     score: 0,
     maxCombo: 0,
     parries: 0,
-    mode: "story",
+    mode: "casuals",
     domain: 0,
     domainIntro: 0,
     domainOwnerSlot: 0,
@@ -309,6 +326,24 @@
     { name: "LOW CURSE", rank: "GRADE 2", color: "#6f4d90", accent: "#b493ff", hp: 82, speed: 138, power: .82, aiLevel: .85, barrageChance: .24 },
     { name: "FIERCE CURSE", rank: "GRADE 1", color: "#ae3867", accent: "#ff6b9a", hp: 112, speed: 168, power: 1.06, aiLevel: 1.14, barrageChance: .46 },
   ];
+  const casualSpeedScale = { slow: .72, normal: 1, fast: 1.28, ultra: 1.58 };
+  const casualKnockbackScale = { low: .55, normal: 1, high: 1.45 };
+  const casualStunScale = { short: .65, normal: 1, long: 1.55 };
+  const casualAiNames = {
+    passive: "Passive",
+    aggressive: "Aggressive",
+    zoner: "Zoner",
+    counter: "Counter Fighter",
+    domainHunter: "Domain Hunter",
+    random: "Random Maniac",
+  };
+  const casualDomainNames = {
+    off: "Off",
+    normal: "Normal",
+    ready: "Starts Ready",
+    every30: "Every 30s",
+    only: "Only Domain",
+  };
 
   const trialCrimes = {
     gojo: [
@@ -675,6 +710,7 @@
     ui.menu.classList.add("hidden");
     ui.onlineMenu?.classList.add("hidden");
     ui.accountPanel?.classList.add("hidden");
+    ui.casualPanel?.classList.add("hidden");
     ui.settingsPanel?.classList.remove("hidden");
     updateSettingsUi();
   }
@@ -915,6 +951,57 @@
     return fighter;
   }
 
+  function makeCasualEnemy(character = selectedCasualEnemy) {
+    const id = characters[character] ? character : "sukuna";
+    const profile = characters[id];
+    const fighter = makeRemotePlayer(2, profile.name, id, "normal");
+    const speedScale = casualSpeedScale[casualSettings.enemySpeed] || 1;
+    fighter.kind = "enemy";
+    fighter.type = {
+      name: profile.name,
+      rank: `${casualAiNames[casualSettings.enemyAi] || "Casual"} CPU`,
+      speed: (id === "hakari" ? 318 : id === "sukuna" ? 312 : id === "higuruma" ? 306 : 295) * speedScale,
+      boss: false,
+      aiLevel: casualSettings.enemyAi === "passive" ? .72 : casualSettings.enemyAi === "aggressive" ? 1.22 : casualSettings.enemyAi === "random" ? 1.05 : 1,
+    };
+    const hp = Math.max(1, 600 * Number(casualSettings.enemyHp || 1));
+    fighter.health = hp;
+    fighter.maxHealth = hp;
+    fighter.lagHealth = hp;
+    fighter.energy = clamp(Number(casualSettings.startingEnergy || 0), 0, 100);
+    fighter.cooldowns = { blue: 0, red: 0, purple: 0, domain: 0, consecutive: 0 };
+    fighter.power = Number(casualSettings.enemyDamage || 1);
+    fighter.casual = true;
+    fighter.casualAi = casualSettings.enemyAi;
+    fighter.casualDomainRule = casualSettings.enemyDomain;
+    fighter.casualDomainTimer = casualSettings.enemyDomain === "ready" ? .8
+      : casualSettings.enemyDomain === "every30" ? 30
+        : casualSettings.enemyDomain === "only" ? 2
+          : casualSettings.enemyDomain === "normal" ? 14 : 9999;
+    fighter.casualOnlyDomain = casualSettings.enemyDomain === "only";
+    fighter.knockbackTaken = casualKnockbackScale[casualSettings.enemyKnockback] || 1;
+    fighter.stunTaken = casualStunScale[casualSettings.enemyStun] || 1;
+    fighter.aiTimer = .25;
+    fighter.decision = casualSettings.enemyAi === "zoner" ? "retreat" : "approach";
+    fighter.emergencyDodges = casualSettings.enemyAi === "counter" ? 4 : casualSettings.enemyAi === "passive" ? 3 : 2;
+    fighter.adaptation = { light: 0, heavy: 0, special: 0, parryBaits: 0 };
+    if (["ready", "every30", "only"].includes(casualSettings.enemyDomain)) fighter.energy = 100;
+    return fighter;
+  }
+
+  function applyCasualPlayerSettings() {
+    const p = game.player;
+    if (!p || game.mode !== "casuals") return;
+    p.energy = clamp(Number(casualSettings.startingEnergy || 0), 0, 100);
+    p.casualDomainRule = casualSettings.playerDomain;
+    p.casualOnlyDomain = casualSettings.playerDomain === "only";
+    p.casualDomainTimer = casualSettings.playerDomain === "every30" ? 0 : 30;
+    if (["ready", "every30", "only"].includes(casualSettings.playerDomain)) {
+      p.energy = 100;
+      if (p.cooldowns?.domain !== undefined) p.cooldowns.domain = 0;
+    }
+  }
+
   function resetProps() {
     const props = {
       shinjuku: [
@@ -941,6 +1028,10 @@
     game.props = props[selectedStage].map((prop) => ({ ...prop }));
   }
 
+  function isEnemySelectionMode() {
+    return selectedMode === "domainUse" || selectedMode === "casuals";
+  }
+
   function renderCharacterSelection() {
     ensureCharacterRoster();
     const profile = characters[selectedCharacter];
@@ -956,10 +1047,41 @@
 
   function updateOfflineSelectionCopy() {
     if (onlineSelection || !ui.characterSelect || ui.characterSelect.classList.contains("hidden")) return;
-    if (selectedMode !== "domainUse") {
+    if (!isEnemySelectionMode()) {
       ui.selectModeLabel.textContent = `${selectedMode.toUpperCase()} / SELECT YOUR FIGHTER`;
       ui.selectionStatus.textContent = "SELECT A FIGHTER";
       ui.confirmCharacter.textContent = "LOCK IN";
+      return;
+    }
+    if (selectedMode === "casuals") {
+      if (offlineSelectionStep === "enemy") {
+        const playerProfile = characters[selectedCasualPlayer] || characters.gojo;
+        ui.selectModeLabel.textContent = "CASUALS / SELECT THE ENEMY";
+        ui.selectionStatus.textContent = "CHOOSE THE CHARACTER YOU WANT TO FIGHT";
+        ui.confirmCharacter.textContent = "LOCK ENEMY";
+        ui.characterBack.textContent = "BACK TO FIGHTER";
+        ui.selectionP1.querySelector("strong").textContent = playerProfile.name;
+        ui.selectionP1.querySelector("small").textContent = "LOCKED";
+        ui.selectionP1.dataset.character = selectedCasualPlayer;
+        ui.selectionP1.classList.add("locked");
+        ui.selectionP2.querySelector("strong").textContent = characters[selectedCharacter]?.name || "CASUAL ENEMY";
+        ui.selectionP2.querySelector("small").textContent = "SELECTING ENEMY";
+        ui.selectionP2.dataset.character = selectedCharacter;
+        ui.selectionP2.classList.remove("locked");
+      } else {
+        ui.selectModeLabel.textContent = "CASUALS / SELECT YOUR FIGHTER";
+        ui.selectionStatus.textContent = "LOCK YOUR FIGHTER, THEN PICK THE ENEMY";
+        ui.confirmCharacter.textContent = "LOCK FIGHTER";
+        ui.characterBack.textContent = "BACK";
+        ui.selectionP1.querySelector("strong").textContent = "PLAYER 1";
+        ui.selectionP1.querySelector("small").textContent = "NOT LOCKED";
+        ui.selectionP1.dataset.character = selectedCharacter;
+        ui.selectionP1.classList.remove("locked");
+        ui.selectionP2.querySelector("strong").textContent = "CASUAL ENEMY";
+        ui.selectionP2.querySelector("small").textContent = "CHOOSE NEXT";
+        ui.selectionP2.dataset.character = selectedCasualEnemy;
+        ui.selectionP2.classList.remove("locked");
+      }
       return;
     }
     if (offlineSelectionStep === "enemy") {
@@ -1001,6 +1123,9 @@
       if (!onlineSelection && selectedMode === "domainUse" && offlineSelectionStep === "enemy") {
         selectedDomainEnemy = selectedCharacter;
       }
+      if (!onlineSelection && selectedMode === "casuals" && offlineSelectionStep === "enemy") {
+        selectedCasualEnemy = selectedCharacter;
+      }
       renderCharacterSelection();
       if (onlineSelection) {
         window.dispatchEvent(new CustomEvent("voidlimit:characterPreview", { detail: { character: selectedCharacter } }));
@@ -1037,6 +1162,7 @@
     selectedCharacter = options.character && characters[options.character] ? options.character : selectedCharacter;
     ui.characterSelect.classList.remove("hidden");
     ui.menu.classList.add("hidden");
+    ui.casualPanel?.classList.add("hidden");
     ui.result.classList.add("hidden");
     ui.confirmCharacter.disabled = false;
     ui.confirmCharacter.textContent = "LOCK IN";
@@ -1123,6 +1249,8 @@
     offlineSelectionStep = "player";
     selectedDomainPlayer = selectedCharacter;
     if (!characters[selectedDomainEnemy]) selectedDomainEnemy = "sukuna";
+    selectedCasualPlayer = selectedCharacter;
+    if (!characters[selectedCasualEnemy]) selectedCasualEnemy = "sukuna";
     openCharacterSelect({ online: false, localName: "PLAYER 1", remoteName: "CURSED SPIRIT" });
   }
 
@@ -1144,14 +1272,15 @@
       }, 5000);
       return;
     }
-    if (selectedMode === "domainUse" && offlineSelectionStep === "player") {
-      selectedDomainPlayer = selectedCharacter;
+    if (isEnemySelectionMode() && offlineSelectionStep === "player") {
+      if (selectedMode === "domainUse") selectedDomainPlayer = selectedCharacter;
+      if (selectedMode === "casuals") selectedCasualPlayer = selectedCharacter;
       offlineSelectionStep = "enemy";
-      selectedCharacter = selectedDomainEnemy;
+      selectedCharacter = selectedMode === "domainUse" ? selectedDomainEnemy : selectedCasualEnemy;
       selectionLocked = false;
       ui.confirmCharacter.disabled = false;
       ui.selectionP1.classList.add("locked");
-      ui.selectionP1.querySelector("strong").textContent = characters[selectedDomainPlayer].name;
+      ui.selectionP1.querySelector("strong").textContent = characters[selectedMode === "domainUse" ? selectedDomainPlayer : selectedCasualPlayer].name;
       ui.selectionP1.querySelector("small").textContent = "LOCKED";
       $$(".character-card").forEach((card) => card.classList.remove("locked"));
       renderCharacterSelection();
@@ -1159,11 +1288,15 @@
       return;
     }
     selectionLocked = true;
-    const remoteCharacter = selectedMode === "domainUse" ? selectedCharacter : "curse";
-    const remoteName = selectedMode === "domainUse" ? characters[remoteCharacter]?.name || "DOMAIN ENEMY" : "CURSED SPIRIT";
+    const remoteCharacter = isEnemySelectionMode() ? selectedCharacter : "curse";
+    const remoteName = isEnemySelectionMode() ? characters[remoteCharacter]?.name || "CPU ENEMY" : "CURSED SPIRIT";
     if (selectedMode === "domainUse") {
       selectedDomainEnemy = remoteCharacter;
       selectedCharacter = selectedDomainPlayer;
+    }
+    if (selectedMode === "casuals") {
+      selectedCasualEnemy = remoteCharacter;
+      selectedCharacter = selectedCasualPlayer;
     }
     ui.confirmCharacter.disabled = true;
     ui.confirmCharacter.textContent = "LOCKED";
@@ -1172,6 +1305,10 @@
     ui.selectionP1.querySelector("small").textContent = "LOCKED";
     ui.selectionStatus.textContent = "FIGHTER LOCKED";
     ui.characterSelect.classList.add("hidden");
+    if (selectedMode === "casuals") {
+      openCasualPanel();
+      return;
+    }
     configureVersus({
       slot: 1,
       localCharacter: selectedCharacter,
@@ -1189,6 +1326,59 @@
     }, 1800);
   }
 
+  function openCasualPanel() {
+    ui.characterSelect.classList.add("hidden");
+    ui.menu.classList.add("hidden");
+    ui.casualPanel?.classList.remove("hidden");
+    updateCasualPanel();
+    tone(260, .08, "square", .12, 130);
+  }
+
+  function closeCasualPanel(backToEnemy = true) {
+    ui.casualPanel?.classList.add("hidden");
+    if (backToEnemy) {
+      offlineSelectionStep = "enemy";
+      selectedCharacter = selectedCasualEnemy;
+      selectionLocked = false;
+      ui.confirmCharacter.disabled = false;
+      ui.characterSelect.classList.remove("hidden");
+      renderCharacterSelection();
+    } else {
+      ui.menu.classList.remove("hidden");
+    }
+  }
+
+  function updateCasualPanel() {
+    if (ui.casualMatchup) {
+      ui.casualMatchup.textContent = `${characters[selectedCasualPlayer]?.name || "PLAYER"} VS ${characters[selectedCasualEnemy]?.name || "ENEMY"}  /  ${stages[selectedStage]?.name || "STAGE"}`;
+    }
+    $$(".casual-options").forEach((group) => {
+      const key = group.dataset.casualGroup;
+      group.querySelectorAll("button").forEach((button) => {
+        button.classList.toggle("active", String(casualSettings[key]) === String(button.dataset.value));
+      });
+    });
+  }
+
+  function beginCasualMatch() {
+    ui.casualPanel?.classList.add("hidden");
+    configureVersus({
+      slot: 1,
+      localCharacter: selectedCharacter,
+      remoteCharacter: selectedCasualEnemy,
+      localName: characters[selectedCharacter].name,
+      remoteName: characters[selectedCasualEnemy]?.name || "CASUAL ENEMY",
+    });
+    ui.intro.classList.remove("hidden");
+    ui.fightCountdown.textContent = "VS";
+    ui.loadingStatus.textContent = `${casualAiNames[casualSettings.enemyAi] || "Casual"} / ${casualDomainNames[casualSettings.enemyDomain] || "Normal"} Domain`;
+    setTimeout(() => {
+      ui.intro.classList.add("hidden");
+      pendingOfflineSelection = false;
+      startGame();
+    }, 1500);
+  }
+
   function startGame() {
     initAudio();
     stopHakariJackpotMusic();
@@ -1203,7 +1393,12 @@
     game.player = makePlayer();
     game.wave = 1;
     game.enemies = [];
-    game.enemy = selectedMode === "domainUse" ? makeDomainUseEnemy(selectedDomainEnemy) : makeEnemy(0);
+    game.enemy = selectedMode === "domainUse"
+      ? makeDomainUseEnemy(selectedDomainEnemy)
+      : selectedMode === "casuals"
+        ? makeCasualEnemy(selectedCasualEnemy)
+        : makeEnemy(0);
+    if (selectedMode === "casuals") applyCasualPlayerSettings();
     if (selectedMode === "survival") spawnSurvivalWave(1);
     game.particles.length = 0;
     game.projectiles.length = 0;
@@ -1212,7 +1407,7 @@
     game.flash = 0;
     game.hitstop = 0;
     game.slow = 0;
-    game.time = selectedMode === "training" || selectedMode === "domainUse" ? Infinity : selectedMode === "survival" ? 120 : 99;
+    game.time = selectedMode === "training" || selectedMode === "domainUse" || selectedMode === "casuals" ? Infinity : selectedMode === "survival" ? 120 : 99;
     game.score = 0;
     game.maxCombo = 0;
     game.parries = 0;
@@ -1245,11 +1440,13 @@
     resetProps();
     ui.menu.classList.add("hidden");
     ui.settingsPanel?.classList.add("hidden");
+    ui.casualPanel?.classList.add("hidden");
     ui.result.classList.add("hidden");
     ui.pause.classList.add("hidden");
     ui.clash.classList.add("hidden");
     ui.hud.classList.remove("hidden");
     announce(selectedMode === "domainUse" ? `DOMAIN USE: ${characters[selectedDomainEnemy]?.name || "ENEMY"}`
+      : selectedMode === "casuals" ? `CASUALS: ${casualAiNames[casualSettings.enemyAi] || "CPU"}`
       : selectedMode === "training" ? "TRAINING START"
       : selectedCharacter === "sukuna" ? "THE KING ENTERS"
         : selectedCharacter === "hakari" ? "FEVER START"
@@ -1335,6 +1532,7 @@
     ui.result.classList.add("hidden");
     ui.clash.classList.add("hidden");
     ui.settingsPanel?.classList.add("hidden");
+    ui.casualPanel?.classList.add("hidden");
     ui.menu.classList.remove("hidden");
   }
 
@@ -1885,6 +2083,18 @@
     }
     if (!p || p.stun > 0 || p.charging || p.techniqueCharge || p.chargeRecovery > 0 || p.executionRecovery > 0
       || (game.cinematic > 0 && !domainResponse) || game.clash || (game.online.active && Date.now() < game.online.startAt)) return;
+    if (game.mode === "casuals") {
+      if (p.casualDomainRule === "off" && name === "domain") {
+        announce("PLAYER DOMAIN OFF");
+        tone(70, .06, "square", .12, -20);
+        return;
+      }
+      if (p.casualOnlyDomain && name !== "domain") {
+        announce("ONLY DOMAIN ENABLED");
+        tone(70, .06, "square", .12, -20);
+        return;
+      }
+    }
     if (!(name in profile.costs)) return;
     if (p.character === "gojo" && name === "purple") {
       if (!game.unstablePurple || game.unstablePurple.state !== "unstable") return;
@@ -2086,6 +2296,7 @@
       }
       p.domainsUsed = (p.domainsUsed || 0) + 1;
       game.online.stats.domains++;
+      if (game.mode === "casuals" && p.casualDomainRule === "every30") p.casualDomainTimer = 30;
       p.trialStartup = 2;
       p.trialStartupHealth = p.health;
       p.vx = 0;
@@ -2117,6 +2328,7 @@
       return;
     }
     p.domainsUsed = (p.domainsUsed || 0) + 1;
+    if (game.mode === "casuals" && p.casualDomainRule === "every30") p.casualDomainTimer = 30;
     p.trialStartup = 2;
     p.trialStartupHealth = p.health;
     p.vx = 0;
@@ -2936,6 +3148,7 @@
       updateWorldSlashUnlock(p);
     }
     p.domainsUsed = (p.domainsUsed || 0) + 1;
+    if (game.mode === "casuals" && p.casualDomainRule === "every30") p.casualDomainTimer = 30;
     p.cooldowns.domain = profile.cooldowns.domain;
     p.attack = null;
     p.state = "domain";
@@ -3196,10 +3409,12 @@
 
   function enemyStartCharacterSpecial(e) {
     if (!e || e.stun > 0 || e.attack) return false;
+    if (e.casualOnlyDomain) return false;
     const p = game.player;
     const dist = Math.abs(p.x - e.x);
     const facing = e.facing || (p.x > e.x ? 1 : -1);
-    e.energy = 100;
+    if (e.casual) e.energy = Math.max(0, e.energy - 8);
+    else e.energy = 100;
     if (e.character === "gojo") {
       const roll = Math.random();
       if (roll > .82 && dist > 150) {
@@ -3442,10 +3657,12 @@
     const scale = attack.fixedDamage ? 1 : attacker.kind === "player" ? p.damageScale : attacker.power;
     const armored = isPlayerDefending && p.character === "hakari" && p.attack?.armor && !attack.strong;
     const damage = attack.damage * scale * (armored ? .42 : 1);
+    const knockbackTaken = Number(defender.knockbackTaken || 1);
+    const stunTaken = Number(defender.stunTaken || 1);
     defender.health -= damage;
-    defender.vx = attacker.facing * (attack.kbX || 130);
+    defender.vx = attacker.facing * (attack.kbX || 130) * knockbackTaken;
     if (attack.kbY) {
-      defender.vy = attack.downslam || attack.reaction === "slam" ? Math.abs(attack.kbY) : -Math.abs(attack.kbY);
+      defender.vy = (attack.downslam || attack.reaction === "slam" ? Math.abs(attack.kbY) : -Math.abs(attack.kbY)) * knockbackTaken;
       defender.grounded = false;
     }
     if (attack.pull) {
@@ -3468,6 +3685,7 @@
     if (attack.pull) defender.stun = Math.max(defender.stun, .55);
     if (attack.throwBehind) defender.stun = Math.max(defender.stun, .68);
     if (attack.crumple && defender.grounded) defender.stun = Math.max(defender.stun, .9);
+    if (stunTaken !== 1) defender.stun = clamp(defender.stun * stunTaken, .05, 3);
     defender.flash = .12;
     if (!armored) defender.attack = null;
     defender.reaction = attack.reaction || (!defender.grounded ? "air" : attack.strong ? "body" : "stumble");
@@ -3951,6 +4169,59 @@
     retargetSurvivalEnemy();
   }
 
+  function runCasualCharacterAi(e, dist, aggression) {
+    const p = game.player;
+    const ai = e.casualAi || "aggressive";
+    if (e.casualOnlyDomain) {
+      e.blocking = chance(.25);
+      e.decision = dist > 110 ? "approach" : "retreat";
+      return true;
+    }
+    e.blocking = false;
+    if (ai === "passive") {
+      e.blocking = chance(.48);
+      if (dist < 95 && chance(.22 * aggression)) enemyStartCharacterMelee(e, false);
+      else if (dist < 310 && chance(.12)) enemyStartCharacterSpecial(e);
+      else e.decision = chance(.68) ? "retreat" : "approach";
+      return true;
+    }
+    if (ai === "zoner") {
+      if (dist < 170) e.decision = "retreat";
+      else if (dist < 560 && chance(.78 * aggression)) enemyStartCharacterSpecial(e);
+      else e.decision = chance(.65) ? "retreat" : "approach";
+      return true;
+    }
+    if (ai === "counter") {
+      e.blocking = chance(.38);
+      if (p.attack && dist < 165 && chance(.72 * aggression)) enemyStartCharacterMelee(e, chance(.55));
+      else if (dist < 115 && chance(.34)) enemyStartCharacterMelee(e, false);
+      else e.decision = dist < 145 ? "retreat" : "approach";
+      return true;
+    }
+    if (ai === "domainHunter") {
+      e.energy = Math.min(100, e.energy + 10);
+      if (e.energy >= 100 && triggerEnemyDomainUse(e)) return true;
+      if (dist < 120 && chance(.46 * aggression)) enemyStartCharacterMelee(e, false);
+      else if (dist < 420 && chance(.46)) enemyStartCharacterSpecial(e);
+      else e.decision = "approach";
+      return true;
+    }
+    if (ai === "random") {
+      const roll = Math.random();
+      if (roll < .18) e.decision = "retreat";
+      else if (roll < .34) e.blocking = true;
+      else if (roll < .58 && dist < 160) enemyStartCharacterMelee(e, chance(.5));
+      else if (roll < .82 && dist < 540) enemyStartCharacterSpecial(e);
+      else e.decision = "approach";
+      if (chance(.12)) announce("RANDOM MANIAC PANIC");
+      return true;
+    }
+    if (dist < 130 && chance(.78 * aggression)) enemyStartCharacterMelee(e, chance(.36));
+    else if (dist < 420 && chance(.38 * aggression)) enemyStartCharacterSpecial(e);
+    else e.decision = "approach";
+    return true;
+  }
+
   function updateEnemyEntity(e, dt) {
     const p = game.player;
     if (!e) return;
@@ -4012,8 +4283,10 @@
       if (e.aiTimer <= 0) {
         const aggression = (difficulty === "easy" ? .72 : difficulty === "hard" ? 1.18 : 1) * Number(e.type.aiLevel || 1);
         e.aiTimer = rnd(e.domainUse ? .22 : .18, e.domainUse ? .55 : .48) / aggression;
-        if (e.domainUse && e.character) {
-          if (dist < 118 && chance(.58)) {
+        if ((e.domainUse || e.casual) && e.character) {
+          if (e.casual && runCasualCharacterAi(e, dist, aggression)) {
+            // Casual AI decisions are handled by the preset brain above.
+          } else if (dist < 118 && chance(.58)) {
             enemyStartCharacterMelee(e, chance(.38));
           } else if (dist < 420 && chance(.72)) {
             if (!enemyStartCharacterSpecial(e)) e.decision = "approach";
@@ -4054,6 +4327,11 @@
         const desired = dist > 90 ? e.facing : dist < 58 ? -e.facing : 0;
         e.vx = lerp(e.vx, desired * e.type.speed, clamp(dt * 7, 0, 1));
         if (e.baiting <= 0) e.state = desired ? "run" : "idle";
+      }
+      if (e.decision === "retreat" && !e.attack) {
+        const desired = dist < 360 ? -e.facing : 0;
+        e.vx = lerp(e.vx, desired * e.type.speed, clamp(dt * 7, 0, 1));
+        e.state = desired ? "run" : "idle";
       }
       const dodgeBias = e.type.boss ? .16 : .08;
       if (p.attack && p.attack.strong && p.attack.active && dist < 130 && e.emergencyDodges > 0 && chance(dodgeBias)) {
@@ -4686,7 +4964,29 @@
 
   function triggerEnemyDomainUse(enemy) {
     if (!enemy || enemy.stun > 0 || enemy.health <= 0 || game.domain > 0 || game.domainStartup > 0 || game.trial || game.clash) return false;
-    if (enemy.character === "hakari" || enemy.character === "higuruma") return false;
+    if (enemy.casualDomainRule === "off") return false;
+    const resetTimer = enemy.casual ? 30 : 5;
+    if (enemy.character === "hakari") {
+      enemy.energy = 0;
+      enemy.jackpot = Math.max(enemy.jackpot || 0, 18);
+      enemy.awakening = Math.max(enemy.awakening || 0, 18);
+      enemy.heat = 100;
+      enemy.domainUseTimer = resetTimer;
+      game.jackpotFlash = 1;
+      spawnParticles(enemy.x, enemy.y - 60, "#5cff91", 62, 560, 8, .95);
+      announce("ENEMY HIT JACKPOT");
+      return true;
+    }
+    if (enemy.character === "higuruma") {
+      enemy.energy = 0;
+      enemy.awakening = Math.max(enemy.awakening || 0, 16);
+      enemy.executionSword = Math.max(enemy.executionSword || 0, 10);
+      enemy.executionSwordUsed = false;
+      enemy.domainUseTimer = resetTimer;
+      spawnParticles(enemy.x, enemy.y - 60, "#f2cf74", 58, 520, 8, .95);
+      announce("ENEMY DEADLY SENTENCING");
+      return true;
+    }
     game.domain = enemy.character === "sukuna" ? 15 : 12;
     game.domainCharacter = enemy.character;
     game.domainOwnerSlot = 2;
@@ -4701,7 +5001,7 @@
     enemy.state = "domain";
     enemy.stateTime = 0;
     enemy.invuln = Math.max(enemy.invuln || 0, .45);
-    enemy.domainUseTimer = 5;
+    enemy.domainUseTimer = resetTimer;
     spawnParticles(W / 2, H / 2, enemy.character === "sukuna" ? "#ff254c" : "#9f8cff", 76, 520, 7, 1.2);
     announce(enemy.character === "sukuna" ? "ENEMY MALEVOLENT SHRINE" : "ENEMY UNLIMITED VOID");
     speakLine(enemy.character === "sukuna" ? "Open your eyes." : "Domain Expansion.");
@@ -4729,6 +5029,37 @@
     if (game.domain > 0 || game.domainStartup > 0 || game.trial || game.clash || e.stun > 0) return;
     e.domainUseTimer = Math.max(0, Number(e.domainUseTimer || 5) - dt);
     if (e.domainUseTimer <= 0 && !triggerEnemyDomainUse(e)) e.domainUseTimer = .25;
+  }
+
+  function updateCasualMode(dt) {
+    if (game.mode !== "casuals" || !game.player || !game.enemy || game.online.active) return;
+    const p = game.player;
+    const e = game.enemy;
+    if (p.casualDomainRule === "every30") {
+      p.casualDomainTimer = Math.max(0, Number(p.casualDomainTimer || 0) - dt);
+      if (p.casualDomainTimer <= 0) {
+        p.energy = 100;
+        p.cooldowns.domain = 0;
+        p.casualDomainTimer = 30;
+        announce("PLAYER DOMAIN READY");
+      }
+    }
+    if (e.casualDomainRule === "off") return;
+    if (e.casualDomainRule === "normal") {
+      e.casualDomainTimer = Math.max(0, Number(e.casualDomainTimer || 14) - dt);
+      if (e.energy < 100 || e.casualDomainTimer > 0) return;
+    }
+    if (e.casualDomainRule === "ready" && e.energy < 100) e.energy = 100;
+    if (e.casualDomainRule === "every30" || e.casualDomainRule === "only") {
+      e.domainUseTimer = Math.max(0, Number(e.domainUseTimer || 30) - dt);
+      if (e.domainUseTimer > 0) return;
+      e.energy = 100;
+    }
+    const normalReady = e.casualDomainRule === "normal";
+    const hunter = e.casualAi === "domainHunter" || e.casualDomainRule === "only" || e.casualDomainRule === "ready";
+    if ((hunter || normalReady) && e.energy >= 100 && !e.attack && e.stun <= 0) {
+      if (!triggerEnemyDomainUse(e)) e.domainUseTimer = .35;
+    }
   }
 
   function checkRound(dt) {
@@ -4836,19 +5167,6 @@
   }
 
   function continueMode() {
-    if (game.mode === "story" && game.wave < 3) {
-      game.wave++;
-      game.enemy = makeEnemy(game.wave - 1);
-      game.player.health = Math.min(game.player.maxHealth, game.player.health + 18);
-      game.player.energy = Math.min(100, game.player.energy + 25);
-      game.unstablePurple = null;
-      game.time = 99;
-      game.outcomePending = false;
-      game.projectiles.length = 0;
-      resetProps();
-      announce(`ENCOUNTER ${game.wave}`);
-      return true;
-    }
     if (game.mode === "survival") {
       game.wave++;
       spawnSurvivalWave(game.wave);
@@ -4876,7 +5194,7 @@
         ? `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds fought | No winner`
         : `${Math.floor((Date.now() - game.online.startedAt) / 1000)} seconds survived | ${game.online.remoteName}`
       : won
-        ? game.mode === "story" ? "The curtain falls. The strongest remains." : game.mode === "domainUse" ? "You survived the domain pressure." : "Another impossible record."
+        ? game.mode === "casuals" ? "Casual battle cleared." : game.mode === "domainUse" ? "You survived the domain pressure." : "Another impossible record."
         : "Power means nothing without timing.";
     const labels = [...ui.result.querySelectorAll(".stats span")];
     if (game.mode === "online") {
@@ -4905,7 +5223,7 @@
       $("#resultQuit").textContent = "MODE SELECT";
       $("#leaveOnlineResult").classList.add("hidden");
     }
-    if (won && game.mode === "story") unlockCostume("snowfall");
+    if (won && game.mode === "casuals") unlockCostume("snowfall");
     if (won && game.mode === "domainUse") unlockCostume("eclipse");
     recordMatchProgress(won, draw);
     if (won && game.player.character === "sukuna") speakLine("You never stood a chance.");
@@ -5376,6 +5694,7 @@
     ui.menu.classList.add("hidden");
     ui.onlineMenu?.classList.add("hidden");
     ui.settingsPanel?.classList.add("hidden");
+    ui.casualPanel?.classList.add("hidden");
     ui.accountPanel.classList.remove("hidden");
     updateAccountUi();
     if (!SERVER_ACCOUNTS_AVAILABLE) {
@@ -5515,7 +5834,7 @@
     if (!p || !e) return;
     const survivalLiving = activeSurvivalEnemies();
     const profile = characterProfile(p);
-    const enemyProfile = game.online.active || game.mode === "domainUse" ? characterProfile(e) : null;
+    const enemyProfile = game.online.active || game.mode === "domainUse" || game.mode === "casuals" ? characterProfile(e) : null;
     ui.playerHealth.style.transform = `scaleX(${clamp(p.health / p.maxHealth, 0, 1)})`;
     ui.playerLag.style.transform = `scaleX(${clamp(p.lagHealth / p.maxHealth, 0, 1)})`;
     ui.playerEnergy.style.transform = `scaleX(${p.energy / 100})`;
@@ -5529,18 +5848,20 @@
     ui.playerPortrait.querySelector("span").textContent = playerMark;
     ui.enemyName.textContent = isSurvivalMode()
       ? `SURVIVAL CURSES ${survivalLiving.length}/${survivalEnemyLimit(game.wave)}`
-      : game.mode === "domainUse"
+      : game.mode === "domainUse" || game.mode === "casuals"
         ? `${enemyProfile.name}  ${Math.ceil(e.health)} HP`
       : `${game.online.active ? enemyProfile.name : e.type.name}  ${Math.ceil(e.health)} HP`;
     ui.enemyState.textContent = game.online.active
       ? `${e.type.rank}${e.onlineVariant === "inverted" ? " / INVERTED" : ""}${e.burned ? " / BURNED" : ""}`
       : game.mode === "domainUse"
         ? `${e.character === "hakari" ? "PERMANENT JACKPOT" : e.character === "higuruma" ? "AWAKENED JUDGMENT" : `DOMAIN IN ${Math.max(0, e.domainUseTimer || 0).toFixed(1)}s`}`
+      : game.mode === "casuals"
+        ? `${casualAiNames[e.casualAi] || "Casual"} / ${casualDomainNames[e.casualDomainRule] || "Domain"}`
       : isSurvivalMode() ? `${e.type.rank} TARGET / PUNCH + BARRAGE` : e.type.rank;
     const enemyPortrait = e.character === "sukuna" ? "sukuna-portrait" : e.character === "hakari" ? "hakari-portrait" : e.character === "higuruma" ? "higuruma-portrait" : "gojo-portrait";
     const enemyMark = e.character === "sukuna" ? "SK" : e.character === "hakari" ? "HK" : e.character === "higuruma" ? "HG" : "VI";
-    ui.enemyPortrait.className = `portrait ${game.online.active || game.mode === "domainUse" ? enemyPortrait : "curse-portrait"}`;
-    ui.enemyPortrait.querySelector("span").textContent = game.online.active || game.mode === "domainUse" ? enemyMark : "CR";
+    ui.enemyPortrait.className = `portrait ${game.online.active || game.mode === "domainUse" || game.mode === "casuals" ? enemyPortrait : "curse-portrait"}`;
+    ui.enemyPortrait.querySelector("span").textContent = game.online.active || game.mode === "domainUse" || game.mode === "casuals" ? enemyMark : "CR";
     const normalPlayerState = game.online.active
       ? `PLAYER ${game.online.slot}${p.onlineVariant === "inverted" ? " / INVERTED" : ""}${p.burned ? " / BURNED" : ""}${p.jackpot > 0 ? ` / JACKPOT ${p.jackpot.toFixed(1)}s` : ""}`
       : p.awakening > 0
@@ -5560,9 +5881,10 @@
         ? `CHARGE RECOVERY ${p.chargeRecovery.toFixed(1)}s`
         : p.chargeCooldown > 0 ? `CHARGE COOLDOWN ${p.chargeCooldown.toFixed(1)}s` : normalPlayerState;
     ui.timer.textContent = game.mode === "training" || !Number.isFinite(game.time) ? "INF" : String(Math.ceil(game.time)).padStart(2, "0");
-    ui.mode.textContent = game.mode === "domainUse" ? "DOMAIN USE" : game.mode.toUpperCase();
+    ui.mode.textContent = game.mode === "domainUse" ? "DOMAIN USE" : game.mode === "casuals" ? "CASUALS" : game.mode.toUpperCase();
     ui.wave.textContent = game.online.active ? `P${game.online.slot} / ${Math.max(0, Math.round(game.online.startAt - Date.now())) > 0 ? "SYNC" : "LIVE"}`
       : game.mode === "domainUse" ? `DOMAIN ENEMY`
+      : game.mode === "casuals" ? `${casualAiNames[e.casualAi] || "CASUAL CPU"}`
       : game.mode === "survival" ? `WAVE ${game.wave} / CAP ${survivalEnemyLimit(game.wave)}` : game.mode === "training" ? "FRAME LAB" : `ENCOUNTER ${game.wave}`;
     ui.stageLabel.textContent = `${stages[selectedStage].name} / ${stages[selectedStage].subtitle}`;
     ui.combo.querySelector("strong").textContent = p.comboHits;
@@ -5709,6 +6031,7 @@
     }
     const scaledDt = dt * (game.slow > 0 ? .22 : 1);
     updateDomainUseMode(scaledDt);
+    updateCasualMode(scaledDt);
     updatePlayer(scaledDt);
     updateEnemy(scaledDt);
     updateProjectiles(scaledDt);
@@ -8545,7 +8868,7 @@
     game.online.active = false;
     game.online.slot = 0;
     game.online.remoteTarget = null;
-    selectedMode = "story";
+    selectedMode = "casuals";
     onlineSelection = false;
     ui.characterSelect.classList.add("hidden");
     quitToMenu();
@@ -8596,6 +8919,11 @@
         tone(65, .08, "square", .15, -80);
         return;
       }
+      if (game.mode === "casuals" && game.player?.casualOnlyDomain) {
+        announce("ONLY DOMAIN ENABLED");
+        tone(70, .06, "square", .12, -20);
+        return;
+      }
       if (game.player?.character === "sukuna" && keys.has("r") && firstPress) {
         if (startFuga()) queueOnlineEdge("fuga");
       } else if (["gojo", "sukuna", "higuruma"].includes(game.player?.character)) {
@@ -8606,6 +8934,11 @@
       }
     }
     if (key === "r") {
+      if (game.mode === "casuals" && game.player?.casualOnlyDomain) {
+        announce("ONLY DOMAIN ENABLED");
+        tone(70, .06, "square", .12, -20);
+        return;
+      }
       if (game.player?.character === "sukuna" && keys.has("e") && firstPress) {
         if (startFuga()) queueOnlineEdge("fuga");
       } else {
@@ -8722,6 +9055,9 @@
       if (game.player?.moveConfiscation > 0) {
         announce("CONFISCATED");
         tone(65, .08, "square", .15, -80);
+      } else if (game.mode === "casuals" && game.player?.casualOnlyDomain) {
+        announce("ONLY DOMAIN ENABLED");
+        tone(70, .06, "square", .12, -20);
       } else if (game.player?.character === "sukuna" && keys.has("r")) {
         if (startFuga()) queueOnlineEdge("fuga");
       } else if (["gojo", "sukuna", "higuruma"].includes(game.player?.character)) {
@@ -8734,7 +9070,10 @@
     }
     if (action === "r") {
       keys.add("r");
-      if (game.player?.character === "sukuna" && keys.has("e")) {
+      if (game.mode === "casuals" && game.player?.casualOnlyDomain) {
+        announce("ONLY DOMAIN ENABLED");
+        tone(70, .06, "square", .12, -20);
+      } else if (game.player?.character === "sukuna" && keys.has("e")) {
         if (startFuga()) queueOnlineEdge("fuga");
       } else {
         queueOnlineEdge("special", "blue");
@@ -8796,6 +9135,20 @@
     tone(250, .04, "square", .1, 80);
   }));
 
+  $$(".casual-options button").forEach((button) => button.addEventListener("click", () => {
+    const group = button.closest(".casual-options");
+    const key = group?.dataset.casualGroup;
+    if (!key || !(key in casualSettings)) return;
+    const raw = button.dataset.value;
+    casualSettings[key] = ["startingEnergy", "enemyHp", "enemyDamage"].includes(key) ? Number(raw) : raw;
+    group.querySelectorAll("button").forEach((entry) => entry.classList.toggle("active", entry === button));
+    updateCasualPanel();
+    tone(260, .04, "square", .1, 100);
+  }));
+
+  ui.casualBack?.addEventListener("click", () => closeCasualPanel(true));
+  ui.casualStart?.addEventListener("click", beginCasualMatch);
+
   $$(".difficulty button").forEach((button) => button.addEventListener("click", () => {
     $$(".difficulty button").forEach((b) => b.classList.remove("active"));
     button.classList.add("active");
@@ -8833,9 +9186,9 @@
       ui.characterSelect.classList.add("hidden");
       return;
     }
-    if (selectedMode === "domainUse" && offlineSelectionStep === "enemy") {
+    if (isEnemySelectionMode() && offlineSelectionStep === "enemy") {
       offlineSelectionStep = "player";
-      selectedCharacter = selectedDomainPlayer;
+      selectedCharacter = selectedMode === "domainUse" ? selectedDomainPlayer : selectedCasualPlayer;
       selectionLocked = false;
       ui.confirmCharacter.disabled = false;
       $$(".character-card").forEach((card) => card.classList.remove("locked"));
